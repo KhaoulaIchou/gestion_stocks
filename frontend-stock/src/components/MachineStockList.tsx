@@ -105,6 +105,17 @@ const MachineStockList = () => {
                   >
                     Affecter
                   </button>
+                  <button
+                    onClick={() => {
+                      axios.put(`http://localhost:3000/machines/${machine.id}/deliver`)
+                        .then(() => alert("Machine marquée comme délivrée"))
+                        .catch((err) => console.error("Erreur :", err));
+                    }}
+                    className="px-3 py-1 bg-red-500 text-white rounded"
+                  >
+                    Délivrer
+                  </button>
+
                 </td>
               </tr>
             ))}

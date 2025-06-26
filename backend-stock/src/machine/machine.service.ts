@@ -41,6 +41,14 @@ export class MachineService {
     });
   }
 
+  findDelivered() {
+  return this.prisma.machine.findMany({
+    where: { status: "délivrée" },
+  });
+}
+
+
+
   // Affecter une destination à une machine
   async assignDestination(id: number, destinationId: number) {
     return this.prisma.machine.update({
@@ -79,5 +87,12 @@ export class MachineService {
     machines: machinesToDeliver.map((m) => m.reference),
   };
 }
+async markAsDelivered(id: number) {
+  return this.prisma.machine.update({
+    where: { id },
+    data: { status: "délivrée" }
+  });
+}
+
 
 }

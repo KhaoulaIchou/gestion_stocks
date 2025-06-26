@@ -79,4 +79,15 @@ checkDelivered() {
   return this.machineService.updateDeliveredMachines();
 }
 
+@Get('delivrees')
+findDelivered() {
+  return this.machineService.findDelivered();
+}
+@Put(':id/deliver')
+markAsDelivered(@Param('id') id: string) {
+  return this.machineService.markAsDelivered(+id);
+}
+
+
+
 }
