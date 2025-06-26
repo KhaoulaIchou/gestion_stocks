@@ -1,0 +1,44 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: stock-db
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: gestion_stock
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend-stock
+      dockerfile: Dockerfile
+    container_name: stock-backend
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: "postgresql://admin:password123@postgres:5432/gestion_stock"
+    ports:
+      - "3000:3000"
+    command: >
+      sh -c "npx prisma generate &&
+             npx prisma migrate deploy &&
+             npm run start:prod"
+
+  frontend:
+    build:
+      context: ./frontend-stock
+      dockerfile: Dockerfile
+    container_name: stock-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
