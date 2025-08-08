@@ -2,43 +2,38 @@ generator client {
   provider = "prisma-client-js"
 }
 
-
 datasource db {
-  provider = "postgresql"
+  provider = "sqlserver"
   url      = env("DATABASE_URL")
 }
 
 model Destination {
-  id       Int       @id @default(autoincrement())
-  name     String
-  parentId Int?       
-  parent   Destination? @relation("SubDestinations", fields: [parentId], references: [id])
-  children Destination[] @relation("SubDestinations")
-  machines Machine[]
+  id        Int           @id @default(autoincrement())
+  name      String
+  parentId  Int?
+  parent    Destination?  @relation("SubDestinations", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children  Destination[] @relation("SubDestinations")
+  machines  Machine[]
 }
-
 
 model Machine {
-  id             Int      @id @default(autoincrement())
-  type           String
-  reference      String
-  numSerie       String
-  numInventaire  String
-  status         String   @default("en_stock")
-  createdAt      DateTime @default(now())
-  destinationId  Int?
-  destination    Destination? @relation(fields: [destinationId], references: [id])
-  histories      History[]
+  id            Int          @id @default(autoincrement())
+  type          String
+  reference     String
+  numSerie      String
+  numInventaire String
+  status        String       @default("en_stock")
+  createdAt     DateTime     @default(now())
+  destinationId Int?
+  destination   Destination? @relation(fields: [destinationId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  histories     History[]
 }
+
 model History {
-  id         Int      @id @default(autoincrement())
-  machineId  Int
-  machine    Machine  @relation(fields: [machineId], references: [id])
-  from       String?  // ancienne destination
-  to         String   // nouvelle destination
-  changedAt  DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  machineId Int
+  machine   Machine  @relation(fields: [machineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  from      String?
+  to        String
+  changedAt DateTime @default(now())
 }
-
-
-
-

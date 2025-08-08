@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, NavLink } from "react-router-dom";
-import AddMachine from "./components/AddMachine";
+//import AddMachine from "./components/AddMachine";
 import MachineStockList from "./components/MachineStockList";
 import DestinationList from "./components/DestinationList";
 import DelivreeMachineList from "./components/DelivreeMachineList"
@@ -60,7 +60,6 @@ function App() {
               path="/"
               element={
                 <>
-                  <AddMachine />
                   <MachineStockList />
                 </>
               }

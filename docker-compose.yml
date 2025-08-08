@@ -1,28 +1,22 @@
-version: '3.9'
-
 services:
-  postgres:
-    image: postgres:15
-    container_name: stock-db
-    restart: always
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: stock-mssql
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: password123
-      POSTGRES_DB: gestion_stock
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=Password123!
     ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - "1433:1433"
+    restart: always
 
   backend:
     build:
       context: ./backend-stock
       dockerfile: Dockerfile
     container_name: stock-backend
-    depends_on:
-      - postgres
+    depends_on: [mssql]
     environment:
-      DATABASE_URL: "postgresql://admin:password123@postgres:5432/gestion_stock"
+      - DATABASE_URL=sqlserver://sa:Password123!@mssql:1433?database=gestion_stock&encrypt=true&trustServerCertificate=true
     ports:
       - "3000:3000"
     command: >
@@ -30,10 +24,10 @@ services:
              npx prisma migrate deploy &&
              npm run start:prod"
 
+
   frontend:
     build:
       context: ./frontend-stock
-      dockerfile: Dockerfile
     container_name: stock-frontend
     ports:
       - "5173:80"
@@ -41,4 +35,4 @@ services:
       - backend
 
 volumes:
-  postgres_data:
+  mssql_data:

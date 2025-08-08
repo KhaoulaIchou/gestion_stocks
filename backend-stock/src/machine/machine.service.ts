@@ -5,7 +5,6 @@ import { PrismaService } from '../prisma/prisma.service';
 export class MachineService {
   constructor(private prisma: PrismaService) {}
 
-  // Créer une machine (statut stocké par défaut)
   create(data: {
     type: string;
     reference: string;
@@ -20,21 +19,18 @@ export class MachineService {
     });
   }
 
-  // Récupérer toutes les machines
   findAll() {
     return this.prisma.machine.findMany({
       include: { destination: true },
     });
   }
 
-  // Récupérer uniquement les machines en stock (non affectées)
   findStock() {
     return this.prisma.machine.findMany({
       where: { status: 'stocké', destinationId: null },
     });
   }
 
-  // Récupérer les machines affectées à une destination
   findByDestination(destinationId: number) {
     return this.prisma.machine.findMany({
       where: { destinationId },
@@ -49,7 +45,6 @@ export class MachineService {
 
 
 
-  // Affecter une destination à une machine
   async assignDestination(id: number, destinationId: number) {
     return this.prisma.machine.update({
       where: { id },
