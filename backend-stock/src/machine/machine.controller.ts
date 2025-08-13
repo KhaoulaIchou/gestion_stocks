@@ -1,93 +1,89 @@
-import { Controller, Post, Body, Get, Put, Param } from '@nestjs/common';
+import { Controller, Post, Body, Get, Put, Param, Delete } from '@nestjs/common';
 import { MachineService } from './machine.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { Public } from '../auth/roles.decorator';
 
+type CreateDto = {
+  type: string;
+  reference: string;
+  numSerie: string;
+  numInventaire: string;
+};
+
+type UpdateDto = Partial<CreateDto> & {
+  status?: 'stocké' | 'affectée' | 'délivrée' | string;
+  destinationId?: number | null;
+};
+@Public()
 @Controller('machines')
 export class MachineController {
   constructor(
     private readonly machineService: MachineService,
     private readonly prisma: PrismaService,
   ) {}
-
+  @Public()
   @Post()
-  create(@Body() body: {
-    type: string;
-    reference: string;
-    numSerie: string;
-    numInventaire: string;
-  }) {
+  create(@Body() body: CreateDto) {
     return this.machineService.create(body);
   }
-
+  @Public()
   @Get()
   findAll() {
     return this.machineService.findAll();
   }
-
+  @Public()
   @Get('stock')
   findStock() {
     return this.machineService.findStock();
   }
-
+  @Public()
   @Get('destination/:id')
   findByDestination(@Param('id') id: string) {
     return this.machineService.findByDestination(Number(id));
   }
 
-@Put(':id/assign')
-async assignDestination(
-  @Param('id') id: string,
-  @Body() body: { destinationId: number },
-) {
-  const machine = await this.prisma.machine.findUnique({
-    where: { id: Number(id) },
-    include: { destination: true },
-  });
-
-  if (!machine) {
-    throw new Error('Machine introuvable');
+  /** -------- Réparations -------- */
+  @Public()
+  @Get('repairs')
+  findRepairs() {
+    return this.machineService.findRepairs();
   }
-
-  const newDestination = await this.prisma.destination.findUnique({
-    where: { id: body.destinationId },
-  });
-
-  if (!newDestination) {
-    throw new Error('Destination introuvable');
+  @Public()
+  @Put(':id/finish-repair')
+  finishRepair(@Param('id') id: string) {
+    return this.machineService.finishRepair(+id);
   }
-
-  const updatedMachine = await this.prisma.machine.update({
-    where: { id: Number(id) },
-    data: {
-      destinationId: body.destinationId,
-      status: 'affectée',
-    },
-  });
-
-  await this.prisma.history.create({
-    data: {
-      machineId: updatedMachine.id,
-      from: machine.destination?.name || 'Stock',
-      to: newDestination.name,
-    },
-  });
-
-  return updatedMachine;
-}
-@Put('check-delivered')
-checkDelivered() {
-  return this.machineService.updateDeliveredMachines();
-}
-
-@Get('delivrees')
-findDelivered() {
-  return this.machineService.findDelivered();
-}
-@Put(':id/deliver')
-markAsDelivered(@Param('id') id: string) {
-  return this.machineService.markAsDelivered(+id);
-}
-
+  /** ------------------------------ */
+  @Public()
+  @Put('check-delivered')
+  checkDelivered() {
+    return this.machineService.updateDeliveredMachines();
+  }
+  @Public()
+  @Get('delivrees')
+  findDelivered() {
+    return this.machineService.findDelivered();
+  }
+  @Public()
+  @Put(':id/deliver')
+  markAsDelivered(@Param('id') id: string) {
+    return this.machineService.markAsDelivered(+id);
+  }
+  @Public()
+  @Put(':id')
+  updateOne(@Param('id') id: string, @Body() body: UpdateDto) {
+    return this.machineService.update(+id, body);
+  }
+  @Public()
+  @Delete(':id')
+  deleteOne(@Param('id') id: string) {
+    return this.machineService.delete(+id);
+  }
+  @Public()
+  @Post('bulk-delete')
+  bulkDelete(@Body() body: { ids: number[] }) {
+    return this.machineService.bulkDelete(body.ids || []);
+  }
 
 
 }

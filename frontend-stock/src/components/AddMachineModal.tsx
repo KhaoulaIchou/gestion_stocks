@@ -3,8 +3,8 @@ import React, { useState, useEffect } from "react";
 type AddMachineModalProps = {
   open: boolean;
   onClose: () => void;
-  defaultType?: string;           // ex: "unité centrale", "imprimante", ...
-  onCreated?: () => void;         // callback pour rafraîchir la liste après création
+  defaultType?: string;
+  onCreated?: () => void;
 };
 
 const AddMachineModal: React.FC<AddMachineModalProps> = ({
@@ -22,37 +22,40 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    // Pré-remplir le type avec la catégorie active
     setMachine((m) => ({ ...m, type: defaultType || "" }));
   }, [defaultType, open]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    setMachine({ ...machine, [e.target.name]: e.target.value });
-  };
+  ) => setMachine({ ...machine, [e.target.name]: e.target.value });
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    try {
-      const res = await fetch("http://localhost:3000/machines", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(machine),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "Échec de l’ajout");
-      }
-      onCreated?.();
-      onClose();
-    } catch (err: any) {
-      alert(err.message || "Erreur réseau");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  e.preventDefault();
+  setSubmitting(true);
+  try {
+    const res = await fetch("/machines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({
+        ...machine,
+        status: "stocke",                    // SANS accent
+        destinationId: null,
+        createdAt: new Date().toISOString(), // requis si NOT NULL
+      }),
+    });
+
+    const text = await res.text();
+    if (!res.ok) throw new Error(text || `Échec de l’ajout (${res.status})`);
+
+    onCreated?.();
+    onClose();
+  } catch (err: any) {
+    alert(err?.message || "Erreur réseau");
+  } finally {
+    setSubmitting(false);
+  }
+};
+
 
   if (!open) return null;
 

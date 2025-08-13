@@ -4,35 +4,62 @@ services:
     container_name: stock-mssql
     environment:
       - ACCEPT_EULA=Y
-      - SA_PASSWORD=Password123!
+      - SA_PASSWORD=Admin123!
     ports:
       - "1433:1433"
-    restart: always
+    volumes:
+      - mssql_data:/var/opt/mssql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/1433'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
 
   backend:
     build:
       context: ./backend-stock
       dockerfile: Dockerfile
     container_name: stock-backend
-    depends_on: [mssql]
+    depends_on:
+      mssql:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=sqlserver://sa:Password123!@mssql:1433?database=gestion_stock&encrypt=true&trustServerCertificate=true
+      - DATABASE_URL=sqlserver://mssql:1433;database=gestion_stock;user=sa;password=Admin123!;encrypt=true;trustServerCertificate=true
+      - NODE_ENV=production
+      - JWT_SECRET=changeme
+      - JWT_EXPIRES=1d
     ports:
       - "3000:3000"
+    restart: unless-stopped
     command: >
-      sh -c "npx prisma generate &&
-             npx prisma migrate deploy &&
-             npm run start:prod"
+      bash -lc "
+        until </dev/tcp/mssql/1433; do
+          echo 'attente mssql...'; sleep 1;
+        done;
+        npx prisma generate &&
+        npx prisma migrate deploy &&
+        npm run start:prod
+      "
 
-
-  frontend:
+  frontend:      
     build:
       context: ./frontend-stock
+      dockerfile: Dockerfile.dev
     container_name: stock-frontend
     ports:
-      - "5173:80"
-    depends_on:
-      - backend
+      - "5173:5173"
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./frontend-stock:/app
+      - /app/node_modules
+    command: >
+      sh -c "npm install &&
+             npm run dev -- --host 0.0.0.0 --port 5173 --strictPort"
+
 
 volumes:
   mssql_data:
