@@ -40,8 +40,10 @@ services:
         done;
         npx prisma generate &&
         npx prisma migrate deploy &&
+        npm run build &&           # <--- AJOUT
         npm run start:prod
       "
+
 
   frontend:      
     build:

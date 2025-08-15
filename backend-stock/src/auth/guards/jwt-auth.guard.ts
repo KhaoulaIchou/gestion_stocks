@@ -6,11 +6,13 @@ import { IS_PUBLIC_KEY } from '../roles.decorator';
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
   constructor(private reflector: Reflector) { super(); }
-  canActivate(ctx: ExecutionContext) {
+
+  canActivate(context: ExecutionContext) {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      ctx.getHandler(), ctx.getClass(),
+      context.getHandler(),
+      context.getClass(),
     ]);
-    if (isPublic) return true;
-    return super.canActivate(ctx);
+    if (isPublic) return true;            
+    return super.canActivate(context);
   }
 }

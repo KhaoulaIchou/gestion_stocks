@@ -473,7 +473,6 @@ export default function DestinationList() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Machines par juridiction, composante et type</h2>
-            <p className="mt-1 text-sm text-gray-600">Tags + recherche (réf & inventaire). « Afficher plus » ouvre un modal complet. Double-clic sur une carte pour les actions.</p>
           </div>
         </div>
 

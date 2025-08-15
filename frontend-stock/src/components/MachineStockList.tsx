@@ -142,10 +142,7 @@ const MachineStockList = () => {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Gestion du Stock</h1>
-            <p className="mt-1 text-sm text-gray-600">
-              Deux sections : <span className="font-medium">Stock</span> puis{" "}
-              <span className="font-medium">Réparations</span>. Recherchez, affectez, exportez.
-            </p>
+
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -319,19 +316,14 @@ const MachineStockList = () => {
             </tbody>
           </table>
         </div>
-        <p className="text-[11px] text-gray-500">
-          Astuce : double-cliquez sur une ligne pour afficher le bouton de suppression.
-        </p>
+
       </section>
 
       {/* ===== SECTION RÉPARATIONS (en dessous) ===== */}
       <section className="rounded-2xl bg-white p-6 shadow ring-1 ring-gray-200">
         <div className="mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Machines en cours de réparation</h2>
-          <p className="text-xs text-gray-500">
-            Envoyées par les juridictions à la direction pour maintenance. Cliquez sur{" "}
-            <span className="font-medium">Fin réparation</span> pour renvoyer à la source (historique conservé).
-          </p>
+
         </div>
 
         <Suspense

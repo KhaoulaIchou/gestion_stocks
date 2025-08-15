@@ -11,7 +11,7 @@ import { UsersModule } from './users/users.module';
 
 
 @Module({
-  imports: [InitModule, PrismaModule, MachineModule, DestinationModule, HistoryModule],
+  imports: [InitModule, PrismaModule, MachineModule, DestinationModule, HistoryModule, AuthModule, UsersModule,],
   controllers: [AppController],
   providers: [AppService],
 })
