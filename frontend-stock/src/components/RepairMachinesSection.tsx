@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { api } from "../lib/api";
+type Role = 'ADMIN' | 'MANAGER' | 'VIEWER';
+const readRole = (): Role => {
+  try {
+    const raw = localStorage.getItem('user');
+    const u = raw ? JSON.parse(raw) : null;
+    const r = (u?.roles?.[0] || u?.role || 'VIEWER').toString().toUpperCase();
+    return (['ADMIN','MANAGER','VIEWER'].includes(r) ? r : 'VIEWER') as Role;
+  } catch { return 'VIEWER'; }
+};
 
 type HistoryRow = {
   id: number;
@@ -41,14 +51,6 @@ const isDelivered = (s?: string | null) =>
 const isRepair = (s?: string | null) =>
   REPAIR_KEYS.some((k) => tl(s).includes(k));
 
-/**
- * Déduit proprement la juridiction source à partir d’une liste d’évènements.
- * Stratégie robuste :
- * - parcourt l’historique dans l’ordre croissant
- * - mémorise la dernière destination “significative” (≠ Stock, ≠ Réparation, ≠ Délivrance)
- * - dès qu’on rencontre la première entrée en réparation -> on retourne la dernière destination mémorisée
- * - fallback : renvoyer la dernière destination significative, sinon ""
- */
 function computeSourceFromHistory(rows: HistoryRow[]): string {
   const H = rows
     .slice()
@@ -81,6 +83,9 @@ export default function RepairMachinesSection({ onDone }: { onDone?: () => void 
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState<number | null>(null);
+  const [role, setRole] = useState<Role>('VIEWER');
+  useEffect(() => { setRole(readRole()); }, []);
+  const canFinish = role === 'ADMIN' || role === 'MANAGER';
 
   async function loadRepairs() {
     try {
@@ -88,12 +93,12 @@ export default function RepairMachinesSection({ onDone }: { onDone?: () => void 
       setErr(null);
 
       // 1) machines en réparation
-      let list: RepairMachine[] | null = null;
+      /*let list: RepairMachine[] | null = null;
       try {
         const r = await fetch("/machines/repairs");
         if (r.ok) list = await r.json();
       } catch {
-        /* noop */
+        
       }
 
       if (!list) {
@@ -102,10 +107,20 @@ export default function RepairMachinesSection({ onDone }: { onDone?: () => void 
         const all: RepairMachine[] = await rAll.json();
         list = all.filter((m) => isRepairStatus(m.status));
       }
+      setData(list || []);*/
+      let list: RepairMachine[] | null = null;
+      try {
+        list = await api<RepairMachine[]>("/machines/repairs");
+      } catch { /* noop */ }
+
+      if (!list) {
+        const all = await api<RepairMachine[]>("/machines");
+        list = all.filter((m) => isRepairStatus(m.status));
+      }
       setData(list || []);
 
       // 2) historique complet (une seule fois)
-      const rh = await fetch("/history");
+      /*const rh = await fetch("/history");
       if (rh.ok) {
         const allH: HistoryRow[] = await rh.json();
         const grouped: Record<number, HistoryRow[]> = {};
@@ -116,7 +131,19 @@ export default function RepairMachinesSection({ onDone }: { onDone?: () => void 
         setHistoryByMachine(grouped);
       } else {
         setHistoryByMachine({});
+      }*/
+     try {
+      const allH = await api<HistoryRow[]>("/history");
+      const grouped: Record<number, HistoryRow[]> = {};
+      for (const h of allH) {
+        if (!grouped[h.machineId]) grouped[h.machineId] = [];
+        grouped[h.machineId].push(h);
       }
+      setHistoryByMachine(grouped);
+    } catch {
+      setHistoryByMachine({});
+    }
+
     } catch (e: any) {
       setErr(e?.message || "Erreur de chargement des réparations");
       setData([]);
@@ -189,19 +216,17 @@ export default function RepairMachinesSection({ onDone }: { onDone?: () => void 
   );
 
   async function finishRepair(id: number) {
-    setBusy(id);
-    try {
-      const res = await fetch(`/machines/${id}/finish-repair`, { method: "PUT" });
-      if (!res.ok) {
-        alert(`PUT /machines/${id}/finish-repair ${res.status}`);
-        return;
-      }
-      await loadRepairs();
-      onDone?.();
-    } finally {
-      setBusy(null);
-    }
+  if (!canFinish) return;            // ← bloque VIEWER
+  setBusy(id);
+  try {
+    await api<void>(`/machines/${id}/finish-repair`, { method: "PUT" });
+    await loadRepairs();
+    onDone?.();
+  } finally {
+    setBusy(null);
   }
+}
+
 
   return (
     <div className="space-y-4">
@@ -284,17 +309,23 @@ export default function RepairMachinesSection({ onDone }: { onDone?: () => void 
 
                         <div className="mt-3 flex items-center justify-end gap-2">
                           <button
-                            disabled={busy === m.id}
-                            onClick={() => finishRepair(m.id)}
+                            disabled={!canFinish || busy === m.id}
+                            onClick={() => canFinish && finishRepair(m.id)}
                             className={[
                               "rounded-lg px-3 py-1.5 text-xs font-medium text-white",
-                              busy === m.id
-                                ? "bg-emerald-400"
-                                : "bg-emerald-600 hover:bg-emerald-700",
+                              !canFinish
+                                ? "bg-emerald-600 opacity-50 cursor-not-allowed"
+                                : (busy === m.id ? "bg-emerald-400" : "bg-emerald-600 hover:bg-emerald-700")
                             ].join(" ")}
+                            title={
+                              !canFinish
+                                ? "Permission requise (ADMIN ou MANAGER)"
+                                : (busy === m.id ? "Traitement…" : "Fin réparation")
+                            }
                           >
                             {busy === m.id ? "Traitement…" : "Fin réparation"}
                           </button>
+
                         </div>
                       </div>
                     );

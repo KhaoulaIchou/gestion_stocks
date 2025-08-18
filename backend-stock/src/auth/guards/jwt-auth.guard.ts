@@ -1,7 +1,8 @@
-import { ExecutionContext, Injectable } from '@nestjs/common';
+// auth/guards/jwt-auth.guard.ts
+import { Injectable, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
-import { IS_PUBLIC_KEY } from '../roles.decorator';
+import { IS_PUBLIC_KEY } from '../roles.decorator'; // même fichier/clé que ton Public()
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -12,7 +13,15 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) return true;            
+    if (isPublic) return true;
     return super.canActivate(context);
+  }
+
+  handleRequest(err: any, user: any, info: any) {
+    if (err || !user) {
+      // info?.message contient souvent "jwt malformed", etc.
+      throw err || new UnauthorizedException(info?.message || 'Unauthorized');
+    }
+    return user;
   }
 }

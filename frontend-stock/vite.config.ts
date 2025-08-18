@@ -29,14 +29,27 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      '/auth':         { target: 'http://backend:3000', changeOrigin: true },
-      '/machines':     { target: 'http://backend:3000', changeOrigin: true },
-      '/destinations': { target: 'http://backend:3000', changeOrigin: true },
-      '/history':      { target: 'http://backend:3000', changeOrigin: true },
+      '/api': {
+        target: 'http://backend:3000',
+        changeOrigin: true,
+        // ⬇️ Retire le préfixe /api avant d'envoyer à Nest
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
     },
   },
 })
 
 
+/*export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true,
+    proxy: {
+      '/api': { target: 'http://backend:3000', changeOrigin: true },
+    },
+  },
+});*/
 
 

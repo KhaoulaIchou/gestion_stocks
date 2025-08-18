@@ -2,6 +2,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
+import { api } from "../lib/api";
+type Role = 'ADMIN' | 'MANAGER' | 'VIEWER';
+const readRole = (): Role => {
+  try {
+    const raw = localStorage.getItem('user');
+    const u = raw ? JSON.parse(raw) : null;
+    const r = (u?.roles?.[0] || u?.role || 'VIEWER').toString().toUpperCase();
+    return (['ADMIN','MANAGER','VIEWER'].includes(r) ? r : 'VIEWER') as Role;
+  } catch { return 'VIEWER'; }
+};
 
 /** --- Types --- */
 interface Machine {
@@ -82,37 +92,32 @@ function SingleMachineModal({
   onClose,
   item,
   onUpdated,
+  canManage
 }: {
   open: boolean;
   onClose: () => void;
   item: { m: Machine; destinationFull: string } | null;
   onUpdated: () => void;
+  canManage: boolean;
 }) {
   if (!open || !item) return null;
   const { m, destinationFull } = item;
   const eligible = olderThanSixYears(m.createdAt);
 
   const putRepair = async () => {
-    const ok = confirm(
-      "Confirmez-vous la mise en réparation ? Le statut passera à « en cours de réparation »."
-    );
+    if (!canManage) return;
+    const ok = confirm("Confirmez-vous la mise en réparation ? Le statut passera à « en cours de réparation ».");
     if (!ok) return;
-    const res = await fetch(`/machines/${m.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "en cours de réparation" }),
-    });
-    if (!res.ok) return alert("Erreur lors de la mise en réparation");
+    await api<void>(`/machines/${m.id}`, { method: "PUT", body: JSON.stringify({ status: "en cours de réparation" }) });
     onUpdated();
     onClose();
   };
 
   const deliver = async () => {
-    if (!eligible) return;
+    if (!canManage || !eligible) return;
     const ok = confirm("Confirmez-vous la délivrance de cette machine ?");
     if (!ok) return;
-    const res = await fetch(`/machines/${m.id}/deliver`, { method: "PUT" });
-    if (!res.ok) return alert("Erreur lors de la délivrance");
+    await api<void>(`/machines/${m.id}/deliver`, { method: "PUT" });
     onUpdated();
     onClose();
   };
@@ -145,28 +150,35 @@ function SingleMachineModal({
         </div>
 
         <div className="mt-4 flex items-center justify-end gap-2">
+        <button
+          onClick={canManage ? putRepair : undefined}
+          disabled={!canManage}
+          className={`rounded border px-3 py-2 text-xs font-medium ${
+            canManage ? "text-amber-700 hover:bg-amber-50" : "text-amber-500 opacity-50 cursor-not-allowed"
+          }`}
+          title={canManage ? "Mettre en réparation" : "Permission requise (ADMIN ou MANAGER)"}
+        >
+          Réparation
+        </button>
+
+        {eligible && (
           <button
-            onClick={putRepair}
-            className="rounded border px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-50"
-            title="Mettre en réparation"
+            onClick={canManage ? deliver : undefined}
+            disabled={!canManage}
+            className={`rounded px-3 py-2 text-xs font-medium text-white ${
+              canManage ? "bg-indigo-600 hover:bg-indigo-700" : "bg-indigo-300 cursor-not-allowed"
+            }`}
+            title={canManage ? "Délivrer (≥ 6 ans)" : "Permission requise (ADMIN ou MANAGER)"}
           >
-            Réparation
+            Délivrer
           </button>
-          {eligible && (
-            <button
-              onClick={deliver}
-              className="rounded bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
-              title="Délivrer (≥ 6 ans)"
-            >
-              Délivrer
-            </button>
-          )}
-          
-          {!eligible && (
-            <span className="text-xs text-gray-500" title="Non éligible (< 6 ans)">
-              Non éligible à la délivrance
-            </span>
-          )}
+        )}
+        {!eligible && (
+          <span className="text-xs text-gray-500" title="Non éligible (< 6 ans)">
+            Non éligible à la délivrance
+          </span>
+        )}
+
         </div>
       </motion.div>
     </div>
@@ -181,9 +193,10 @@ type MoreModalProps = {
   machines: Array<{ m: Machine; destinationFull: string }>;
   onRepaired: () => void;
   onDelivered: () => void;
+  canManage: boolean;
 };
 
-function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered }: MoreModalProps) {
+function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered, canManage }: MoreModalProps) {
   const [q, setQ] = useState(""); // recherche ref/inventaire
   useEffect(() => { if (!open) setQ(""); }, [open]);
 
@@ -196,24 +209,21 @@ function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered }: 
   }, [machines, q]);
 
   const putRepair = async (id: number) => {
+    if (!canManage) return;
     const ok = confirm("Confirmez-vous la mise en réparation ? Le statut passera à « en cours de réparation ».");
     if (!ok) return;
-    const res = await fetch(`/machines/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "en cours de réparation" }),
-    });
-    if (!res.ok) return alert("Erreur lors de la mise en réparation");
+    await api<void>(`/machines/${id}`, { method: "PUT", body: JSON.stringify({ status: "en cours de réparation" }) });
     onRepaired();
   };
 
   const deliver = async (id: number) => {
+    if (!canManage) return;
     const ok = confirm("Confirmez-vous la délivrance de cette machine ?");
     if (!ok) return;
-    const res = await fetch(`/machines/${id}/deliver`, { method: "PUT" });
-    if (!res.ok) return alert("Erreur lors de la délivrance");
+    await api<void>(`/machines/${id}/deliver`, { method: "PUT" });
     onDelivered();
   };
+
 
   if (!open) return null;
   return (
@@ -267,19 +277,28 @@ function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered }: 
                     <td className="px-3 py-2">{destinationFull}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => putRepair(m.id)}
-                          className="rounded border px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-                          title="Mettre en réparation"
+                       <button
+                          onClick={() => canManage && putRepair(m.id)}
+                          disabled={!canManage}
+                          className={`rounded border px-2 py-1 text-xs ${
+                            canManage ? "text-amber-700 hover:bg-amber-50" : "text-amber-500 opacity-50 cursor-not-allowed"
+                          }`}
+                          title={canManage ? "Mettre en réparation" : "Permission requise (ADMIN ou MANAGER)"}
                         >
                           Réparation
                         </button>
-                       
+
                         <button
-                          onClick={() => eligible && deliver(m.id)}
-                          disabled={!eligible}
-                          className={`rounded px-2 py-1 text-xs text-white ${eligible ? "bg-indigo-600 hover:bg-indigo-700" : "bg-indigo-300 cursor-not-allowed"}`}
-                          title={eligible ? "Délivrer (≥ 6 ans)" : "Non éligible (< 6 ans)"}
+                          onClick={() => (canManage && eligible) && deliver(m.id)}
+                          disabled={!canManage || !eligible}
+                          className={`rounded px-2 py-1 text-xs text-white ${
+                            canManage && eligible ? "bg-indigo-600 hover:bg-indigo-700" : "bg-indigo-300 cursor-not-allowed"
+                          }`}
+                          title={
+                            !canManage
+                              ? "Permission requise (ADMIN ou MANAGER)"
+                              : (eligible ? "Délivrer (≥ 6 ans)" : "Non éligible (< 6 ans)")
+                          }
                         >
                           Délivrer
                         </button>
@@ -305,6 +324,10 @@ function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered }: 
 
 /** --- Page principale --- */
 export default function DestinationList() {
+  const [role, setRole] = useState<Role>('VIEWER');
+  useEffect(() => { setRole(readRole()); }, []);
+  const canManage = role === 'ADMIN' || role === 'MANAGER';
+
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -332,12 +355,16 @@ export default function DestinationList() {
     try {
       setLoading(true);
       setErr(null);
-      const res = await fetch("/destinations");
+      /*const res = await fetch("/destinations");
       if (!res.ok) throw new Error(`GET /destinations ${res.status}`);
       const txt = await res.text();
       const list: Destination[] = txt ? JSON.parse(txt) : [];
       list.forEach((d) => { if (!Array.isArray(d.machines)) (d as any).machines = []; });
+      setDestinations(list);*/
+      const list = await api<Destination[]>("/destinations");
+      list.forEach((d) => { if (!Array.isArray(d.machines)) (d as any).machines = []; });
       setDestinations(list);
+
     } catch (e: any) {
       setErr(e?.message || "Erreur lors du chargement");
     } finally {
@@ -655,6 +682,7 @@ export default function DestinationList() {
             machines={moreItems}
             onRepaired={async () => { await refresh(); setMoreOpen(false); }}
             onDelivered={async () => { await refresh(); setMoreOpen(false); }}
+            canManage={canManage}
           />
         )}
       </AnimatePresence>
@@ -666,6 +694,7 @@ export default function DestinationList() {
             onClose={() => setSingleOpen(false)}
             item={singleItem}
             onUpdated={refresh}
+            canManage={canManage}
           />
         )}
       </AnimatePresence>

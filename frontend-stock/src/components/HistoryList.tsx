@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
+import { api } from "../lib/api";
 
 /** ---- Types ---- */
 type History = {
@@ -162,7 +163,7 @@ export default function HistoryPage() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const r1 = await fetch("/history");
+      /*const r1 = await fetch("/history");
       if (!r1.ok) throw new Error(`GET /history ${r1.status}`);
       const d1: History[] = await r1.json();
 
@@ -178,7 +179,20 @@ export default function HistoryPage() {
           numSerie: m.numSerie,
           numInventaire: m.numInventaire,
         }))
+      );*/
+      const d1 = await api<History[]>("/history");
+      const d2 = await api<any[]>("/machines");
+
+      setHist(d1);
+      setMachines(
+        d2.map((m) => ({
+          id: m.id,
+          reference: m.reference,
+          numSerie: m.numSerie,
+          numInventaire: m.numInventaire,
+        }))
       );
+
     } catch (e: any) {
       setErr(e?.message || "Erreur de chargement");
     } finally {

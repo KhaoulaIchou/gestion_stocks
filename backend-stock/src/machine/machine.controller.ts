@@ -1,7 +1,8 @@
 import { Controller, Post, Body, Get, Put, Param, Delete } from '@nestjs/common';
 import { MachineService } from './machine.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { Public } from '../auth/roles.decorator';
+import { Roles } from '../auth/roles.decorator';
+
 
 type CreateDto = {
   type: string;
@@ -14,72 +15,71 @@ type UpdateDto = Partial<CreateDto> & {
   status?: 'stocké' | 'affectée' | 'délivrée' | string;
   destinationId?: number | null;
 };
-@Public()
 @Controller('machines')
 export class MachineController {
   constructor(
     private readonly machineService: MachineService,
     private readonly prisma: PrismaService,
   ) {}
-  @Public()
+  @Roles('ADMIN', 'MANAGER')
   @Post()
   create(@Body() body: CreateDto) {
     return this.machineService.create(body);
   }
-  @Public()
+  @Roles('ADMIN', 'MANAGER', 'VIEWER')
   @Get()
   findAll() {
     return this.machineService.findAll();
   }
-  @Public()
+  @Roles('ADMIN', 'MANAGER', 'VIEWER')
   @Get('stock')
   findStock() {
     return this.machineService.findStock();
   }
-  @Public()
+  @Roles('ADMIN', 'MANAGER', 'VIEWER')
   @Get('destination/:id')
   findByDestination(@Param('id') id: string) {
     return this.machineService.findByDestination(Number(id));
   }
 
   /** -------- Réparations -------- */
-  @Public()
+  @Roles('ADMIN', 'MANAGER', 'VIEWER')
   @Get('repairs')
   findRepairs() {
     return this.machineService.findRepairs();
   }
-  @Public()
+  @Roles('ADMIN', 'MANAGER')
   @Put(':id/finish-repair')
   finishRepair(@Param('id') id: string) {
     return this.machineService.finishRepair(+id);
   }
   /** ------------------------------ */
-  @Public()
+  @Roles('ADMIN', 'MANAGER')
   @Put('check-delivered')
   checkDelivered() {
     return this.machineService.updateDeliveredMachines();
   }
-  @Public()
+  @Roles('ADMIN', 'MANAGER', 'VIEWER')
   @Get('delivrees')
   findDelivered() {
     return this.machineService.findDelivered();
   }
-  @Public()
+  @Roles('ADMIN', 'MANAGER')
   @Put(':id/deliver')
   markAsDelivered(@Param('id') id: string) {
     return this.machineService.markAsDelivered(+id);
   }
-  @Public()
+  @Roles('ADMIN', 'MANAGER')
   @Put(':id')
   updateOne(@Param('id') id: string, @Body() body: UpdateDto) {
     return this.machineService.update(+id, body);
   }
-  @Public()
+  @Roles('ADMIN')
   @Delete(':id')
   deleteOne(@Param('id') id: string) {
     return this.machineService.delete(+id);
   }
-  @Public()
+  @Roles('ADMIN')
   @Post('bulk-delete')
   bulkDelete(@Body() body: { ids: number[] }) {
     return this.machineService.bulkDelete(body.ids || []);

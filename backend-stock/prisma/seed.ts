@@ -3,29 +3,27 @@ import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-async function main() {
-  const email = 'admin@example.com';
-  const plain = 'admin123';
+async function upsertUser(email: string, plain: string, role: 'ADMIN'|'MANAGER'|'VIEWER') {
   const password = await bcrypt.hash(plain, 10);
-
   await prisma.user.upsert({
     where: { email },
-    update: {},
-    create: {
-      email,
-      password,     // <-- utilise la variable, pas un re-hash
-      role: 'ADMIN'
-    },
+    update: { password, role },
+    create: { email, password, role },
   });
+}
 
-  console.log('✅ Admin prêt :', email, '(mdp:', plain, ')');
+async function main() {
+  await upsertUser('admin@example.com',   'admin123',   'ADMIN');
+  await upsertUser('manager@example.com', 'manager123', 'MANAGER');
+  await upsertUser('viewer@example.com',  'viewer123',  'VIEWER');
+  
+  console.log('✅ Comptes créés/mis à jour :');
+  console.log('   ADMIN   → admin@example.com / admin123');
+  console.log('   MANAGER → manager@example.com / manager123');
+  console.log('   VIEWER  → viewer@example.com / viewer123');
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .catch((e) => { console.error(e); process.exit(1); })
+  .finally(async () => { await prisma.$disconnect(); });
+

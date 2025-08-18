@@ -4,6 +4,18 @@ import * as XLSX from "xlsx";
 import AddMachineModal from "./AddMachineModal";
 import EditMachineModal from "./EditMachineModal";
 import AssignDestinationModal from "./AssignDestinationModal";
+import { api } from "../lib/api";
+type Role = 'ADMIN' | 'MANAGER' | 'VIEWER';
+
+function readRoleFromStorage(): Role {
+  try {
+    const raw = localStorage.getItem('user');
+    const u = raw ? JSON.parse(raw) : null;
+    const r = (u?.roles?.[0] || u?.role || 'VIEWER').toString().toUpperCase();
+    return (['ADMIN','MANAGER','VIEWER'].includes(r) ? r : 'VIEWER') as Role;
+  } catch { return 'VIEWER'; }
+}
+
 
 const RepairMachinesSection = lazy(() => import("./RepairMachinesSection"));
 
@@ -55,8 +67,18 @@ const MachineStockList = () => {
   // UI
   const [banner, setBanner] = useState<string | null>(null);
   const [showDeleteForId, setShowDeleteForId] = useState<number | null>(null); // affichage corbeille par double-clic
+  const [role, setRole] = useState<Role>('VIEWER');
 
-  const loadMachines = async () => {
+  useEffect(() => {
+    setRole(readRoleFromStorage());
+  }, []);
+
+  const canCreate = role === 'ADMIN' || role === 'MANAGER';
+  const canAssign = role === 'ADMIN' || role === 'MANAGER';
+  const canEdit   = role === 'ADMIN' || role === 'MANAGER';
+  const canDelete = role === 'ADMIN';
+
+  /*const loadMachines = async () => {
     try {
       const res = await fetch("/machines");
       if (!res.ok) throw new Error(`GET /machines ${res.status}`);
@@ -68,7 +90,17 @@ const MachineStockList = () => {
     } catch {
       setMachines([]);
     }
-  };
+  };*/
+  const loadMachines = async () => {
+  try {
+    const data = await api<Machine[]>("/machines");
+    const onlyStock = data.filter((m) => m.status === "stocké" && !m.destinationId);
+    setMachines(onlyStock);
+  } catch {
+    setMachines([]);
+  }
+};
+
 
   useEffect(() => {
     loadMachines();
@@ -89,7 +121,7 @@ const MachineStockList = () => {
     );
   }, [filteredByCategory, search]);
 
-  const deleteOne = async (id: number) => {
+  /*const deleteOne = async (id: number) => {
     const ok = confirm("Voulez-vous vraiment supprimer cette machine ?");
     if (!ok) return;
     await fetch(`/machines/${id}`, { method: "DELETE" }).catch(() => {});
@@ -97,7 +129,17 @@ const MachineStockList = () => {
     setShowDeleteForId(null);
     setBanner("La machine a été supprimée.");
     setTimeout(() => setBanner(null), 2500);
-  };
+  };*/
+  const deleteOne = async (id: number) => {
+  const ok = confirm("Voulez-vous vraiment supprimer cette machine ?");
+  if (!ok) return;
+  await api<void>(`/machines/${id}`, { method: "DELETE" }).catch(() => {});
+  await loadMachines();
+  setShowDeleteForId(null);
+  setBanner("La machine a été supprimée.");
+  setTimeout(() => setBanner(null), 2500);
+};
+
 
   // Export Excel : un onglet par type, machines visibles en stock (toutes, pas seulement la catégorie active)
   const exportStockExcel = () => {
@@ -153,12 +195,15 @@ const MachineStockList = () => {
               Export Excel (stock)
             </button>
             <button
-              onClick={() => setOpenAdd(true)}
-              title="Ajouter une machine"
-              className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-emerald-700"
+              onClick={canCreate ? () => setOpenAdd(true) : undefined}
+              className={[
+                "rounded-xl px-3 py-2 text-sm font-medium text-white shadow",
+                canCreate ? "bg-emerald-600 hover:bg-emerald-700" : "bg-emerald-600 opacity-50 cursor-not-allowed"
+              ].join(" ")}
             >
               + Nouvelle machine
             </button>
+
           </div>
         </div>
         {banner && (
@@ -250,11 +295,12 @@ const MachineStockList = () => {
                     <tr
                       key={m.id}
                       className="border-t hover:bg-gray-50 transition"
-                      onDoubleClick={() =>
-                        setShowDeleteForId((prev) => (prev === m.id ? null : m.id))
-                      }
-                      title="Double-cliquez pour afficher la suppression"
-                    >
+                      onDoubleClick={() => {
+                        if (!canDelete) return; 
+                        setShowDeleteForId((prev) => (prev === m.id ? null : m.id));
+                      }}
+                      title={canDelete ? "Double-cliquez pour afficher la suppression" : "Suppression réservée à l'administrateur"}
+>
                       <td className="px-5 py-3">
                         <span className="font-medium text-gray-900">{m.reference}</span>
                       </td>
@@ -265,48 +311,48 @@ const MachineStockList = () => {
                       {/* Destination : bouton uniquement */}
                       <td className="px-5 py-3">
                         <button
-                          onClick={() => setAssignTargetId(m.id)}
-                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                          title="Affecter par hiérarchie"
-                        >
-                          Affecter
-                        </button>
-                      </td>
+                        onClick={canAssign ? () => setAssignTargetId(m.id) : undefined}
+                        disabled={!canAssign}
+                        className={[
+                          "rounded-lg px-3 py-1.5 text-xs font-medium text-white",
+                          canAssign ? "bg-blue-600 hover:bg-blue-700" : "bg-blue-600 opacity-50 cursor-not-allowed"
+                        ].join(" ")}
+                        title={canAssign ? "Affecter par hiérarchie" : "Permission requise (ADMIN ou MANAGER)"}
+                      >
+                        Affecter
+                      </button>
+                                            </td>
 
                       {/* Actions : éditer + (optionnel) supprimer si double-clic */}
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
                           <button
-                            className="rounded p-1 hover:bg-gray-100"
-                            title="Modifier"
-                            onClick={() => setEditTarget(m)}
+                            className={[
+                              "rounded p-1",
+                              canEdit ? "hover:bg-gray-100" : "opacity-50 cursor-not-allowed"
+                            ].join(" ")}
+                            title={canEdit ? "Modifier" : "Permission requise (ADMIN ou MANAGER)"}
+                            onClick={canEdit ? () => setEditTarget(m) : undefined}
+                            disabled={!canEdit}
                           >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="h-5 w-5"
-                              viewBox="0 0 24 24"
-                              fill="currentColor"
-                            >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                               <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm18-11.5a1 1 0 0 0 0-1.41l-1.59-1.59a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.08-1.08z" />
                             </svg>
                           </button>
 
-                          {showDelete && (
-                            <button
-                              onClick={() => deleteOne(m.id)}
-                              className="rounded p-1 text-red-600 hover:bg-red-50"
-                              title="Supprimer"
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                className="h-5 w-5"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                              >
-                                <path d="M9 3h6a1 1 0 0 1 1 1v1h4v2h-1v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7H4V5h4V4a1 1 0 0 1 1-1zm1 4H7v12h10V7h-3H10zm1 3h2v7h-2V10zm-4 0h2v7H7v-7zm8 0h2v7h-2v-7zM10 5h4V4h-4v1z" />
-                              </svg>
-                            </button>
-                          )}
+
+                          {canDelete && showDelete && (
+                          <button
+                            onClick={() => deleteOne(m.id)}
+                            className="rounded p-1 text-red-600 hover:bg-red-50"
+                            title="Supprimer (ADMIN uniquement)"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M9 3h6a1 1 0 0 1 1 1v1h4v2h-1v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7H4V5h4V4a1 1 0 0 1 1-1zm1 4H7v12h10V7h-3H10zm1 3h2v7h-2V10zm-4 0h2v7H7v-7zm8 0h2v7h-2v-7zM10 5h4V4h-4v1z" />
+                            </svg>
+                          </button>
+                        )}
+
                         </div>
                       </td>
                     </tr>
@@ -350,14 +396,14 @@ const MachineStockList = () => {
 
       {/* Modales */}
       <AddMachineModal
-        open={openAdd}
+        open={openAdd && canCreate}
         onClose={() => setOpenAdd(false)}
         defaultType={activeCat}
         onCreated={loadMachines}
       />
 
       <EditMachineModal
-        open={!!editTarget}
+        open={!!editTarget && canEdit}
         machine={editTarget}
         onClose={() => setEditTarget(null)}
         onSaved={async () => {
@@ -367,7 +413,7 @@ const MachineStockList = () => {
       />
 
       <AssignDestinationModal
-        open={assignTargetId != null}
+        open={assignTargetId != null && canAssign}
         machineId={assignTargetId}
         onClose={() => setAssignTargetId(null)}
         onAssigned={loadMachines}

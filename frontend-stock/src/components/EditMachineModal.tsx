@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { api } from "../lib/api";
 
 interface Machine {
   id: number;
@@ -58,13 +59,20 @@ export default function EditMachineModal({
     if (!form.reference.trim()) return alert("Référence obligatoire");
     setSaving(true);
     try {
-      const res = await fetch(`http://localhost:3000/machines/${machine.id}`, {
+      /*const res = await fetch(`http://localhost:3000/machines/${machine.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error("Erreur serveur");
+      await onSaved();*/
+      await api(`/machines/${machine.id}`, {
+      method: "PUT",
+      body: JSON.stringify(form),
+      });
       await onSaved();
+      setForm({ type: machine.type || "", reference: "", numSerie: "", numInventaire: "" });
+
     } catch (e) {
       alert("Échec de la sauvegarde");
     } finally {

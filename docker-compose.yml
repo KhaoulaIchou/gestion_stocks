@@ -29,7 +29,7 @@ services:
       - DATABASE_URL=sqlserver://mssql:1433;database=gestion_stock;user=sa;password=Admin123!;encrypt=true;trustServerCertificate=true
       - NODE_ENV=production
       - JWT_SECRET=changeme
-      - JWT_EXPIRES=1d
+      - JWT_EXPIRES=7d
     ports:
       - "3000:3000"
     restart: unless-stopped

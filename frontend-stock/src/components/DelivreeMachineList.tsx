@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
+import { api } from "../lib/api";
 
 /** Types */
 interface Machine {
@@ -61,10 +62,13 @@ function MachineTimelineModal({
         setLoading(true);
         setErr(null);
         // On récupère tout l'historique et on filtre côté client sur machine.id
-        const r = await fetch("/history");
+        /*const r = await fetch("/history");
         if (!r.ok) throw new Error(`GET /history ${r.status}`);
         const all: History[] = await r.json();
+        setHist(all.filter((h) => h.machine?.id === machine.id));*/
+        const all = await api<History[]>("/history");
         setHist(all.filter((h) => h.machine?.id === machine.id));
+
       } catch (e: any) {
         setErr(e?.message || "Erreur lors du chargement de l'historique");
       } finally {
@@ -337,10 +341,13 @@ export default function DelivreeMachineList() {
       try {
         setLoading(true);
         setErr(null);
-        const r = await fetch("/machines/delivrees");
+        /*const r = await fetch("/machines/delivrees");
         if (!r.ok) throw new Error(`GET /machines/delivrees ${r.status}`);
         const list: Machine[] = await r.json();
+        setData(list);*/
+        const list = await api<Machine[]>("/machines/delivrees");
         setData(list);
+
       } catch (e: any) {
         setErr(e?.message || "Erreur lors du chargement");
       } finally {

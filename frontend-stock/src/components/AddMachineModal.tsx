@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { api } from "../lib/api";
 
 type AddMachineModalProps = {
   open: boolean;
@@ -33,7 +34,7 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
   e.preventDefault();
   setSubmitting(true);
   try {
-    const res = await fetch("/machines", {
+    /*const res = await fetch("/machines", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify({
@@ -45,10 +46,17 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
     });
 
     const text = await res.text();
-    if (!res.ok) throw new Error(text || `Échec de l’ajout (${res.status})`);
+    if (!res.ok) throw new Error(text || `Échec de l’ajout (${res.status})`);*/
+    await api("/machines", {
+    method: "POST",
+    body: JSON.stringify(machine), // juste les 4 champs saisis
+  });
+
 
     onCreated?.();
+    setMachine({ type: defaultType || "", reference: "", numSerie: "", numInventaire: "" });
     onClose();
+
   } catch (err: any) {
     alert(err?.message || "Erreur réseau");
   } finally {
