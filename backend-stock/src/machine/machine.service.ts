@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const REPAIR_KEYS = ['réparation', 'en réparation', 'reparation'];
@@ -260,5 +260,38 @@ export class MachineService {
       where: { id: { in: ids } },
     });
     return { deleted: res.count };
+  }
+  async assign(id: number, destinationId: number) {
+    const dest = await this.prisma.destination.findUnique({
+      where: { id: destinationId },
+      select: { id: true, name: true },
+    });
+    if (!dest) throw new NotFoundException('Destination introuvable');
+
+    const before = await this.prisma.machine.findUnique({
+      where: { id },
+      include: { destination: { select: { name: true } } },
+    });
+    if (!before) throw new NotFoundException('Machine introuvable');
+
+    const from = before.destination?.name ?? 'stock';
+    const to = dest.name;
+
+    // statut : adapte la valeur à tes enums/strings (ex: 'affectee', sans accent)
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const m = await tx.machine.update({
+        where: { id },
+        data: { destinationId, status: 'affectee' },
+        include: { destination: true },
+      });
+
+      await tx.history.create({
+        data: { machineId: id, from, to },
+      });
+
+      return m;
+    });
+
+    return updated;
   }
 }

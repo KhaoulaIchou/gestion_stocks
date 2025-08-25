@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Put, Param, Delete } from '@nestjs/common';
+import { Controller, Post, Body, Get, Put, Param, Delete, ParseIntPipe } from '@nestjs/common';
 import { MachineService } from './machine.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Roles } from '../auth/roles.decorator';
@@ -84,6 +84,12 @@ export class MachineController {
   bulkDelete(@Body() body: { ids: number[] }) {
     return this.machineService.bulkDelete(body.ids || []);
   }
-
-
+  @Roles('ADMIN', 'MANAGER')
+  @Put(':id/assign')
+  async assign(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { destinationId: number },
+  ) {
+    return this.machineService.assign(id, body.destinationId);
+  }
 }

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
 import { api } from "../lib/api";
+
 type Role = 'ADMIN' | 'MANAGER' | 'VIEWER';
 const readRole = (): Role => {
   try {
@@ -31,6 +32,10 @@ interface Destination {
 
 /** --- Utils --- */
 const tl = (s: string) => s.trim().toLowerCase();
+
+// NEW: helper pour savoir si une machine est déjà délivrée
+const isDeliveredStatus = (s?: string | null) =>
+  tl(String(s || "")).includes("délivr") || tl(String(s || "")).includes("delivr");
 
 function parseDestinationName(name: string) {
   const [rawJur, rawComp = ""] = name.split("–").map((s) => s.trim());
@@ -103,9 +108,10 @@ function SingleMachineModal({
   if (!open || !item) return null;
   const { m, destinationFull } = item;
   const eligible = olderThanSixYears(m.createdAt);
+  const alreadyDelivered = isDeliveredStatus(m.status); // NEW
 
   const putRepair = async () => {
-    if (!canManage) return;
+    if (!canManage || alreadyDelivered) return; // NEW
     const ok = confirm("Confirmez-vous la mise en réparation ? Le statut passera à « en cours de réparation ».");
     if (!ok) return;
     await api<void>(`/machines/${m.id}`, { method: "PUT", body: JSON.stringify({ status: "en cours de réparation" }) });
@@ -114,7 +120,7 @@ function SingleMachineModal({
   };
 
   const deliver = async () => {
-    if (!canManage || !eligible) return;
+    if (!canManage || !eligible || alreadyDelivered) return; // NEW
     const ok = confirm("Confirmez-vous la délivrance de cette machine ?");
     if (!ok) return;
     await api<void>(`/machines/${m.id}/deliver`, { method: "PUT" });
@@ -150,35 +156,44 @@ function SingleMachineModal({
         </div>
 
         <div className="mt-4 flex items-center justify-end gap-2">
-        <button
-          onClick={canManage ? putRepair : undefined}
-          disabled={!canManage}
-          className={`rounded border px-3 py-2 text-xs font-medium ${
-            canManage ? "text-amber-700 hover:bg-amber-50" : "text-amber-500 opacity-50 cursor-not-allowed"
-          }`}
-          title={canManage ? "Mettre en réparation" : "Permission requise (ADMIN ou MANAGER)"}
-        >
-          Réparation
-        </button>
-
-        {eligible && (
           <button
-            onClick={canManage ? deliver : undefined}
-            disabled={!canManage}
-            className={`rounded px-3 py-2 text-xs font-medium text-white ${
-              canManage ? "bg-indigo-600 hover:bg-indigo-700" : "bg-indigo-300 cursor-not-allowed"
+            onClick={canManage && !alreadyDelivered ? putRepair : undefined} // CHANGED
+            disabled={!canManage || alreadyDelivered} // NEW
+            className={`rounded border px-3 py-2 text-xs font-medium ${
+              !canManage || alreadyDelivered
+                ? "text-amber-500 opacity-50 cursor-not-allowed"
+                : "text-amber-700 hover:bg-amber-50"
             }`}
-            title={canManage ? "Délivrer (≥ 6 ans)" : "Permission requise (ADMIN ou MANAGER)"}
+            title={
+              alreadyDelivered
+                ? "Déjà délivrée (aucune action possible)"
+                : (canManage ? "Mettre en réparation" : "Permission requise (ADMIN ou MANAGER)")
+            }
           >
-            Délivrer
+            Réparation
           </button>
-        )}
-        {!eligible && (
-          <span className="text-xs text-gray-500" title="Non éligible (< 6 ans)">
-            Non éligible à la délivrance
-          </span>
-        )}
 
+          {eligible && !alreadyDelivered && ( // CHANGED
+            <button
+              onClick={canManage ? deliver : undefined}
+              disabled={!canManage}
+              className={`rounded px-3 py-2 text-xs font-medium text-white ${
+                canManage ? "bg-indigo-600 hover:bg-indigo-700" : "bg-indigo-300 cursor-not-allowed"
+              }`}
+              title={canManage ? "Délivrer (≥ 6 ans)" : "Permission requise (ADMIN ou MANAGER)"}
+            >
+              Délivrer
+            </button>
+          )}
+
+          {!eligible && !alreadyDelivered && (
+            <span className="text-xs text-gray-500" title="Non éligible (< 6 ans)">
+              Non éligible à la délivrance
+            </span>
+          )}
+          {alreadyDelivered && (
+            <span className="text-xs text-gray-500">Déjà délivrée</span>
+          )}
         </div>
       </motion.div>
     </div>
@@ -209,7 +224,6 @@ function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered, ca
   }, [machines, q]);
 
   const putRepair = async (id: number) => {
-    if (!canManage) return;
     const ok = confirm("Confirmez-vous la mise en réparation ? Le statut passera à « en cours de réparation ».");
     if (!ok) return;
     await api<void>(`/machines/${id}`, { method: "PUT", body: JSON.stringify({ status: "en cours de réparation" }) });
@@ -217,13 +231,11 @@ function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered, ca
   };
 
   const deliver = async (id: number) => {
-    if (!canManage) return;
     const ok = confirm("Confirmez-vous la délivrance de cette machine ?");
     if (!ok) return;
     await api<void>(`/machines/${id}/deliver`, { method: "PUT" });
     onDelivered();
   };
-
 
   if (!open) return null;
   return (
@@ -268,6 +280,7 @@ function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered, ca
             <tbody>
               {visibleList.map(({ m, destinationFull }) => {
                 const eligible = olderThanSixYears(m.createdAt);
+                const alreadyDelivered = isDeliveredStatus(m.status); // NEW
                 return (
                   <tr key={m.id} className="border-t">
                     <td className="px-3 py-2 font-medium text-gray-900">{m.reference}</td>
@@ -277,27 +290,37 @@ function MoreModal({ open, onClose, title, machines, onRepaired, onDelivered, ca
                     <td className="px-3 py-2">{destinationFull}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-2">
-                       <button
-                          onClick={() => canManage && putRepair(m.id)}
-                          disabled={!canManage}
+                        <button
+                          onClick={() => canManage && !alreadyDelivered && putRepair(m.id)} // CHANGED
+                          disabled={!canManage || alreadyDelivered} // NEW
                           className={`rounded border px-2 py-1 text-xs ${
-                            canManage ? "text-amber-700 hover:bg-amber-50" : "text-amber-500 opacity-50 cursor-not-allowed"
+                            !canManage || alreadyDelivered
+                              ? "text-amber-500 opacity-50 cursor-not-allowed"
+                              : "text-amber-700 hover:bg-amber-50"
                           }`}
-                          title={canManage ? "Mettre en réparation" : "Permission requise (ADMIN ou MANAGER)"}
+                          title={
+                            alreadyDelivered
+                              ? "Déjà délivrée (aucune action possible)"
+                              : (canManage ? "Mettre en réparation" : "Permission requise (ADMIN ou MANAGER)")
+                          }
                         >
                           Réparation
                         </button>
 
                         <button
-                          onClick={() => (canManage && eligible) && deliver(m.id)}
-                          disabled={!canManage || !eligible}
+                          onClick={() => (canManage && eligible && !alreadyDelivered) && deliver(m.id)} // CHANGED
+                          disabled={!canManage || !eligible || alreadyDelivered} // NEW
                           className={`rounded px-2 py-1 text-xs text-white ${
-                            canManage && eligible ? "bg-indigo-600 hover:bg-indigo-700" : "bg-indigo-300 cursor-not-allowed"
+                            canManage && eligible && !alreadyDelivered
+                              ? "bg-indigo-600 hover:bg-indigo-700"
+                              : "bg-indigo-300 cursor-not-allowed"
                           }`}
                           title={
-                            !canManage
-                              ? "Permission requise (ADMIN ou MANAGER)"
-                              : (eligible ? "Délivrer (≥ 6 ans)" : "Non éligible (< 6 ans)")
+                            alreadyDelivered
+                              ? "Déjà délivrée (aucune action possible)"
+                              : (!canManage
+                                  ? "Permission requise (ADMIN ou MANAGER)"
+                                  : (eligible ? "Délivrer (≥ 6 ans)" : "Non éligible (< 6 ans)"))
                           }
                         >
                           Délivrer
@@ -355,16 +378,9 @@ export default function DestinationList() {
     try {
       setLoading(true);
       setErr(null);
-      /*const res = await fetch("/destinations");
-      if (!res.ok) throw new Error(`GET /destinations ${res.status}`);
-      const txt = await res.text();
-      const list: Destination[] = txt ? JSON.parse(txt) : [];
-      list.forEach((d) => { if (!Array.isArray(d.machines)) (d as any).machines = []; });
-      setDestinations(list);*/
       const list = await api<Destination[]>("/destinations");
       list.forEach((d) => { if (!Array.isArray(d.machines)) (d as any).machines = []; });
       setDestinations(list);
-
     } catch (e: any) {
       setErr(e?.message || "Erreur lors du chargement");
     } finally {
@@ -376,7 +392,10 @@ export default function DestinationList() {
   const rows = useMemo(() => {
     return destinations.flatMap((d) => {
       const parsed = parseDestinationName(d.name);
-      return (d.machines || []).map((m) => ({ dest: d, parsed, m }));
+      // CHANGED: on exclut les machines déjà délivrées
+      return (d.machines || [])
+        .filter((m) => !isDeliveredStatus(m.status)) // NEW
+        .map((m) => ({ dest: d, parsed, m }));
     });
   }, [destinations]);
 

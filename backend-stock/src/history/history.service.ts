@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -22,9 +22,20 @@ export class HistoryService {
     });
   }
 
-  async create(data: { machineId: number; from: string; to: string }) {
-    return this.prisma.history.create({
-      data,
-    });
+  async create(data: { machineId: number; from?: string | null; to: string }) {
+
+
+    return this.prisma.history.create({ data });
+  }
+
+  async remove(id: number) {
+    try {
+      await this.prisma.history.delete({ where: { id } });
+    } catch (e: any) {
+      if (e?.code === 'P2025') {
+        throw new NotFoundException('Mouvement introuvable');
+      }
+      throw e;
+    }
   }
 }

@@ -4,6 +4,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
 import { api } from "../lib/api";
 
+/** ---- Rôles (lecture depuis localStorage) ---- */
+type Role = "ADMIN" | "MANAGER" | "VIEWER";
+const readRole = (): Role => {
+  try {
+    const raw = localStorage.getItem("user");
+    const u = raw ? JSON.parse(raw) : null;
+    const r = (u?.roles?.[0] || u?.role || "VIEWER").toString().toUpperCase();
+    return (["ADMIN", "MANAGER", "VIEWER"].includes(r) ? r : "VIEWER") as Role;
+  } catch {
+    return "VIEWER";
+  }
+};
+
 /** ---- Types ---- */
 type History = {
   id: number;
@@ -39,7 +52,7 @@ const IS_DELIVERED_LABEL = "machines délivrées";
 function isDeliveredTo(to: string) {
   return tl(to).includes(tl(IS_DELIVERED_LABEL)) || tl(to).includes("délivr");
 }
-// Résumé par référence : "Affectée le … / Délivrée le …"
+// Résumé par référence
 function buildRefMilestones(items: History[]) {
   const sorted = items
     .slice()
@@ -54,24 +67,68 @@ function buildRefMilestones(items: History[]) {
   };
 }
 
-/** ---- Modal détails machines ---- */
+/** ---- Modal détails machines (avec suppression) ---- */
 function DetailsModal({
   open,
   onClose,
   title,
-  machineIds,
+  items, // items d’historique du groupe (chaque ligne est un mouvement)
   machineIndex,
+  onDeleted, // callback async après suppression
+  canDelete,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
-  machineIds: number[];
+  items: History[];
   machineIndex: Map<number, MachineRow>;
+  onDeleted: (historyId: number) => Promise<void>;
+  canDelete: boolean;
 }) {
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [confirmLabel, setConfirmLabel] = useState<string>("");
+  const [deleting, setDeleting] = useState(false);
+
   if (!open) return null;
-  const list = machineIds
-    .map((id) => machineIndex.get(id))
-    .filter(Boolean) as MachineRow[];
+
+  // Une ligne par élément d’historique (précis)
+  const list = items
+    .slice()
+    .sort((a, b) => +new Date(b.changedAt) - +new Date(a.changedAt))
+    .map((h) => {
+      const m = machineIndex.get(h.machine.id);
+      return {
+        histId: h.id,
+        reference: h.machine.reference,
+        numSerie: m?.numSerie || "",
+        numInventaire: m?.numInventaire || "",
+        when: h.changedAt,
+      };
+    });
+
+  function askDelete(row: (typeof list)[number]) {
+    if (!canDelete) return; // VIEWER => no-op
+    setConfirmId(row.histId);
+    setConfirmLabel(
+      `Réf: ${row.reference} — Inv: ${row.numInventaire} — ${fmtDateTime(
+        row.when
+      )}`
+    );
+  }
+
+  async function doDelete() {
+    if (!confirmId) return;
+    try {
+      setDeleting(true);
+      await api<void>(`/history/${confirmId}`, { method: "DELETE" });
+      // Attendre le rechargement côté parent avant de fermer le modal
+      await onDeleted(confirmId);
+    } finally {
+      setDeleting(false);
+      setConfirmId(null);
+      setConfirmLabel("");
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -81,10 +138,17 @@ function DetailsModal({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: -16 }}
         transition={{ duration: 0.2 }}
-        className="relative z-10 w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl"
+        className="relative z-10 w-full max-w-3xl rounded-2xl bg-white p-5 shadow-xl"
       >
         <div className="mb-3 flex items-start justify-between">
-          <div className="text-lg font-semibold text-gray-900">{title}</div>
+          <div>
+            <div className="text-lg font-semibold text-gray-900">{title}</div>
+            <div className="mt-1 text-xs text-gray-500">
+              {canDelete
+                ? "Double-cliquez sur une ligne ou cliquez sur l’icône pour supprimer."
+                : "Lecture seule : vous n’avez pas la permission de supprimer."}
+            </div>
+          </div>
           <button
             onClick={onClose}
             className="rounded p-2 text-gray-500 hover:bg-gray-100"
@@ -100,23 +164,79 @@ function DetailsModal({
                 <th className="px-3 py-2">Référence</th>
                 <th className="px-3 py-2">N° Série</th>
                 <th className="px-3 py-2">N° Inventaire</th>
+                <th className="px-3 py-2">Date</th>
+                {canDelete && <th className="px-3 py-2 text-right">Action</th>}
               </tr>
             </thead>
             <tbody>
-              {list.map((m) => (
-                <tr key={m.id} className="border-t">
-                  <td className="px-3 py-2">{m.reference}</td>
-                  <td className="px-3 py-2">{m.numSerie}</td>
-                  <td className="px-3 py-2">{m.numInventaire}</td>
+              {list.map((row) => (
+                <tr
+                  key={row.histId}
+                  className={`border-t ${
+                    canDelete ? "cursor-pointer hover:bg-red-50" : "opacity-80"
+                  }`}
+                  onDoubleClick={() => canDelete && askDelete(row)}
+                  title={
+                    canDelete
+                      ? "Double-cliquez pour supprimer"
+                      : "Suppression non autorisée"
+                  }
+                >
+                  <td className="px-3 py-2">{row.reference}</td>
+                  <td className="px-3 py-2">{row.numSerie}</td>
+                  <td className="px-3 py-2">{row.numInventaire}</td>
+                  <td className="px-3 py-2 text-xs text-gray-500">
+                    {fmtDateTime(row.when)}
+                  </td>
+                  {canDelete && (
+                    <td className="px-3 py-2">
+                      <div className="flex justify-end">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            canDelete && askDelete(row);
+                          }}
+                          disabled={!canDelete}
+                          className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${
+                            canDelete
+                              ? "border-red-200 text-red-600 hover:bg-red-50"
+                              : "border-gray-200 text-gray-400 cursor-not-allowed"
+                          }`}
+                          title={
+                            canDelete
+                              ? "Supprimer ce mouvement"
+                              : "Permission requise (ADMIN ou MANAGER)"
+                          }
+                        >
+                          {/* Icône poubelle inline */}
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                            className="h-4 w-4"
+                            aria-hidden="true"
+                          >
+                            <path d="M9 3a1 1 0 0 0-1 1v1H5.5a1 1 0 1 0 0 2H6v12a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7h.5a1 1 0 1 0 0-2H16V4a1 1 0 0 0-1-1H9Zm2 2h2V5h-2v0ZM8 7h8v12a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V7Zm2 3a1 1 0 1 0-2 0v8a1 1 0 1 0 2 0v-8Zm6 0a1 1 0 1 0-2 0v8a1 1 0 1 0 2 0v-8Z" />
+                          </svg>
+                          Supprimer
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
+              {list.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={canDelete ? 5 : 4}
+                    className="px-3 py-6 text-center text-gray-500"
+                  >
+                    Aucune donnée trouvée.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-          {list.length === 0 && (
-            <div className="p-6 text-center text-sm text-gray-500">
-              Aucune donnée série/inventaire trouvée.
-            </div>
-          )}
         </div>
 
         <div className="mt-4 text-right">
@@ -127,6 +247,52 @@ function DetailsModal({
             Fermer
           </button>
         </div>
+
+        {/* Confirmation stylée */}
+        <AnimatePresence>
+          {confirmId !== null && (
+            <div className="absolute inset-0 z-20 grid place-items-center">
+              <div className="absolute inset-0 bg-black/30" />
+              <motion.div
+                initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="relative z-30 w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl ring-1 ring-gray-200"
+              >
+                <div className="text-base font-semibold text-gray-900">
+                  Confirmer la suppression
+                </div>
+                <div className="mt-2 text-sm text-gray-600">
+                  Voulez-vous vraiment supprimer ce mouvement ?
+                </div>
+                <div className="mt-2 rounded-md bg-gray-50 p-3 text-xs text-gray-700">
+                  {confirmLabel}
+                </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setConfirmId(null);
+                      setConfirmLabel("");
+                    }}
+                    className="rounded border px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                    disabled={deleting}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    onClick={doDelete}
+                    disabled={deleting}
+                    className={`rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white ${
+                      deleting ? "opacity-70" : "hover:bg-red-700"
+                    }`}
+                  >
+                    {deleting ? "Suppression…" : "Supprimer"}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </div>
   );
@@ -141,15 +307,22 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // rôle & permission suppression
+  const [role, setRole] = useState<Role>("VIEWER");
+  useEffect(() => {
+    setRole(readRole());
+  }, []);
+  const canDelete = role === "ADMIN" || role === "MANAGER";
+
   // recherches
-  const [q, setQ] = useState(""); // ref/serie/inventaire
-  const [dateFrom, setDateFrom] = useState<string>(""); // yyyy-mm-dd
-  const [dateTo, setDateTo] = useState<string>(""); // yyyy-mm-dd
+  const [q, setQ] = useState("");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
 
   // vues + tris
   const [mode, setMode] = useState<"timeline" | "reference">("timeline");
-  const [timelineOrder, setTimelineOrder] = useState<"desc" | "asc">("desc"); // Récent → Ancien
-  const [refSort, setRefSort] = useState<"asc" | "desc">("asc"); // A→Z
+  const [timelineOrder, setTimelineOrder] = useState<"desc" | "asc">("desc");
+  const [refSort, setRefSort] = useState<"asc" | "desc">("asc");
 
   // pagination
   const [limit, setLimit] = useState(PAGE);
@@ -157,29 +330,12 @@ export default function HistoryPage() {
   // modal
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
-  const [modalIds, setModalIds] = useState<number[]>([]);
+  const [modalItems, setModalItems] = useState<History[]>([]);
 
   // fetchers
   const loadAll = async () => {
     setLoading(true);
     try {
-      /*const r1 = await fetch("/history");
-      if (!r1.ok) throw new Error(`GET /history ${r1.status}`);
-      const d1: History[] = await r1.json();
-
-      const r2 = await fetch("/machines");
-      if (!r2.ok) throw new Error(`GET /machines ${r2.status}`);
-      const d2: any[] = await r2.json();
-
-      setHist(d1);
-      setMachines(
-        d2.map((m) => ({
-          id: m.id,
-          reference: m.reference,
-          numSerie: m.numSerie,
-          numInventaire: m.numInventaire,
-        }))
-      );*/
       const d1 = await api<History[]>("/history");
       const d2 = await api<any[]>("/machines");
 
@@ -192,7 +348,6 @@ export default function HistoryPage() {
           numInventaire: m.numInventaire,
         }))
       );
-
     } catch (e: any) {
       setErr(e?.message || "Erreur de chargement");
     } finally {
@@ -217,19 +372,19 @@ export default function HistoryPage() {
     const to = dateTo ? new Date(dateTo + "T23:59:59") : null;
 
     return hist.filter((h) => {
-      // filtre date
       const ch = new Date(h.changedAt);
       if (from && ch < from) return false;
       if (to && ch > to) return false;
 
-      // filtre texte
       if (!refq) return true;
       const ref = tl(h.machine.reference);
       if (ref.includes(refq)) return true;
 
       const mi = machineIndex.get(h.machine.id);
       if (!mi) return false;
-      return tl(mi.numSerie).includes(refq) || tl(mi.numInventaire).includes(refq);
+      return (
+        tl(mi.numSerie).includes(refq) || tl(mi.numInventaire).includes(refq)
+      );
     });
   }, [hist, q, dateFrom, dateTo, machineIndex]);
 
@@ -244,16 +399,10 @@ export default function HistoryPage() {
   const paged = useMemo(() => sortedByDate.slice(0, limit), [sortedByDate, limit]);
   const canMore = paged.length < sortedByDate.length;
 
-  /** ---- TIMELINE : Groupes Date -> Référence -> (from||to) ---- */
+  /** ---- TIMELINE : Date -> Réf -> (from||to) ---- */
   type TLByDateRef = Record<
-    string, // yyyy-mm-dd
-    Record<
-      string, // reference
-      Record<
-        string, // `${from}||${to}`
-        { items: History[]; machineIds: number[] }
-      >
-    >
+    string,
+    Record<string, Record<string, { items: History[] }>>
   >;
 
   const timelineGroupedByDateRef = useMemo(() => {
@@ -262,30 +411,20 @@ export default function HistoryPage() {
       const day = ymd(h.changedAt);
       const ref = h.machine.reference;
       const ft = `${h.from || ""}||${h.to}`;
-
       if (!g[day]) g[day] = {};
       if (!g[day][ref]) g[day][ref] = {};
-      if (!g[day][ref][ft]) g[day][ref][ft] = { items: [], machineIds: [] };
-
+      if (!g[day][ref][ft]) g[day][ref][ft] = { items: [] };
       g[day][ref][ft].items.push(h);
-      if (!g[day][ref][ft].machineIds.includes(h.machine.id)) {
-        g[day][ref][ft].machineIds.push(h.machine.id);
-      }
     }
-
-    // tri jours selon timelineOrder
     return Object.entries(g).sort(([a], [b]) =>
-      timelineOrder === "desc" ? (a < b ? 1 : -1) : (a < b ? -1 : 1)
+      timelineOrder === "desc" ? (a < b ? 1 : -1) : a < b ? -1 : 1
     );
   }, [paged, timelineOrder]);
 
-  /** ---- Vue PAR RÉFÉRENCE (réf -> date -> from-to) ---- */
+  /** ---- Vue PAR RÉFÉRENCE ---- */
   type ByRef = Record<
     string,
-    Record<
-      string /* day */,
-      Record<string /* `${from}||${to}` */, { items: History[]; machineIds: number[] }>
-    >
+    Record<string, Record<string, { items: History[] }>>
   >;
 
   const groupedByReference: ByRef = useMemo(() => {
@@ -296,16 +435,13 @@ export default function HistoryPage() {
       const FT = `${h.from || ""}||${h.to}`;
       if (!g[R]) g[R] = {};
       if (!g[R][D]) g[R][D] = {};
-      if (!g[R][D][FT]) g[R][D][FT] = { items: [], machineIds: [] };
+      if (!g[R][D][FT]) g[R][D][FT] = { items: [] };
       g[R][D][FT].items.push(h);
-      if (!g[R][D][FT].machineIds.includes(h.machine.id)) {
-        g[R][D][FT].machineIds.push(h.machine.id);
-      }
     }
     return g;
   }, [paged]);
 
-  // tri des références (vue "Par Référence")
+  // tri des références
   const sortedRefs = useMemo(() => {
     const refs = Object.keys(groupedByReference);
     refs.sort((a, b) =>
@@ -314,14 +450,30 @@ export default function HistoryPage() {
     return refs;
   }, [groupedByReference, refSort]);
 
-  // ouvrir le modal (groupe ref/jour/parcours)
-  const openDetails = (reference: string, day: string, from: string, to: string, machineIds: number[]) => {
-    setModalTitle(`${reference} • ${new Date(day).toLocaleDateString()} • ${from || "—"} → ${to}`);
-    setModalIds(machineIds);
+  // Ouvrir modal : on passe la liste d’items (précis)
+  const openDetails = (
+    reference: string,
+    day: string,
+    from: string,
+    to: string,
+    items: History[]
+  ) => {
+    setModalTitle(
+      `${reference} • ${new Date(day).toLocaleDateString()} • ${
+        from || "—"
+      } → ${to}`
+    );
+    setModalItems(items);
     setModalOpen(true);
   };
 
-  /** ---- Export Excel (vue filtrée & tri appliqués) ---- */
+  // Après suppression : recharger et fermer
+  const handleDeleted = async (_historyId: number) => {
+    await loadAll();
+    setModalOpen(false);
+  };
+
+  /** ---- Export Excel ---- */
   const exportExcel = () => {
     const rows = sortedByDate.map((h) => {
       const m = machineIndex.get(h.machine.id);
@@ -373,7 +525,9 @@ export default function HistoryPage() {
       <div className="rounded-2xl bg-gradient-to-r from-indigo-50 to-sky-50 p-6 shadow-sm ring-1 ring-gray-200">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">Historique des affectations</h2>
+            <h2 className="text-2xl font-bold text-gray-900">
+              Historique des affectations
+            </h2>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -420,7 +574,7 @@ export default function HistoryPage() {
             }}
             className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400"
           />
-          {(q || dateFrom || dateTo) ? (
+          {q || dateFrom || dateTo ? (
             <button
               onClick={() => {
                 setQ("");
@@ -437,13 +591,15 @@ export default function HistoryPage() {
           )}
         </div>
 
-        {/* Sélecteurs de vue + tri dépendant du mode */}
+        {/* Sélecteurs de vue + tri */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             onClick={() => setMode("timeline")}
             className={[
               "rounded-full px-3 py-1 text-xs font-medium",
-              mode === "timeline" ? "bg-blue-600 text-white shadow" : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+              mode === "timeline"
+                ? "bg-blue-600 text-white shadow"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200",
             ].join(" ")}
           >
             Timeline
@@ -452,7 +608,9 @@ export default function HistoryPage() {
             onClick={() => setMode("reference")}
             className={[
               "rounded-full px-3 py-1 text-xs font-medium",
-              mode === "reference" ? "bg-blue-600 text-white shadow" : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+              mode === "reference"
+                ? "bg-blue-600 text-white shadow"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200",
             ].join(" ")}
           >
             Par Référence
@@ -465,7 +623,9 @@ export default function HistoryPage() {
                 onClick={() => setTimelineOrder("desc")}
                 className={[
                   "rounded-full px-3 py-1 text-xs font-medium",
-                  timelineOrder === "desc" ? "bg-indigo-600 text-white shadow" : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+                  timelineOrder === "desc"
+                    ? "bg-indigo-600 text-white shadow"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200",
                 ].join(" ")}
               >
                 Récent → Ancien
@@ -474,7 +634,9 @@ export default function HistoryPage() {
                 onClick={() => setTimelineOrder("asc")}
                 className={[
                   "rounded-full px-3 py-1 text-xs font-medium",
-                  timelineOrder === "asc" ? "bg-indigo-600 text-white shadow" : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+                  timelineOrder === "asc"
+                    ? "bg-indigo-600 text-white shadow"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200",
                 ].join(" ")}
               >
                 Ancien → Récent
@@ -487,7 +649,9 @@ export default function HistoryPage() {
                 onClick={() => setRefSort("asc")}
                 className={[
                   "rounded-full px-3 py-1 text-xs font-medium",
-                  refSort === "asc" ? "bg-indigo-600 text-white shadow" : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+                  refSort === "asc"
+                    ? "bg-indigo-600 text-white shadow"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200",
                 ].join(" ")}
               >
                 A → Z
@@ -496,7 +660,9 @@ export default function HistoryPage() {
                 onClick={() => setRefSort("desc")}
                 className={[
                   "rounded-full px-3 py-1 text-xs font-medium",
-                  refSort === "desc" ? "bg-indigo-600 text-white shadow" : "bg-gray-100 text-gray-700 hover:bg-gray-200",
+                  refSort === "desc"
+                    ? "bg-indigo-600 text-white shadow"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200",
                 ].join(" ")}
               >
                 Z → A
@@ -528,7 +694,11 @@ export default function HistoryPage() {
                     {
                       Object.values(byRef as TLByDateRef[string]).reduce(
                         (acc, byFT) =>
-                          acc + Object.values(byFT).reduce((s: number, v) => s + v.items.length, 0),
+                          acc +
+                          Object.values(byFT).reduce(
+                            (s: number, v) => s + v.items.length,
+                            0
+                          ),
                         0
                       )
                     }{" "}
@@ -540,8 +710,13 @@ export default function HistoryPage() {
                   {Object.entries(byRef as TLByDateRef[string])
                     .sort(([a], [b]) => a.localeCompare(b, "fr"))
                     .map(([reference, byFT]) => (
-                      <div key={reference} className="rounded-xl border border-gray-100 p-4">
-                        <div className="mb-2 text-sm font-semibold text-gray-900">{reference}</div>
+                      <div
+                        key={reference}
+                        className="rounded-xl border border-gray-100 p-4"
+                      >
+                        <div className="mb-2 text-sm font-semibold text-gray-900">
+                          {reference}
+                        </div>
 
                         <div className="space-y-2">
                           {Object.entries(byFT)
@@ -549,42 +724,47 @@ export default function HistoryPage() {
                             .map(([ft, payload]) => {
                               const [from, to] = ft.split("||");
                               const count = payload.items.length;
-                              const uniqIds = payload.machineIds;
-                              const canAggregate = uniqIds.length > 1;
-
-                              // heure (premier mvt du groupe, selon tri)
+                              const delivered = isDeliveredTo(to);
                               const first = payload.items
                                 .slice()
-                                .sort((A, B) =>
-                                  timelineOrder === "desc"
-                                    ? +new Date(B.changedAt) - +new Date(A.changedAt)
-                                    : +new Date(A.changedAt) - +new Date(B.changedAt)
+                                .sort(
+                                  (A, B) =>
+                                    +new Date(B.changedAt) -
+                                    +new Date(A.changedAt)
                                 )[0];
-
-                              const delivered = isDeliveredTo(to);
 
                               return (
                                 <div
                                   key={ft}
                                   className={[
                                     "flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3",
-                                    delivered ? "border-indigo-200 bg-indigo-50" : "border-gray-100 bg-gray-50",
+                                    delivered
+                                      ? "border-indigo-200 bg-indigo-50"
+                                      : "border-gray-100 bg-gray-50",
                                   ].join(" ")}
                                 >
                                   <div className="min-w-0">
                                     <div className="text-sm">
-                                      <span className="font-medium text-gray-800">{from || "—"}</span>
-                                      <span className="mx-2 text-gray-400">→</span>
+                                      <span className="font-medium text-gray-800">
+                                        {from || "—"}
+                                      </span>
+                                      <span className="mx-2 text-gray-400">
+                                        →
+                                      </span>
                                       {delivered ? (
                                         <span className="inline-flex items-center rounded-full bg-indigo-600 px-2 py-0.5 text-xs font-semibold text-white">
                                           DÉLIVRÉE
                                         </span>
                                       ) : (
-                                        <span className="font-medium text-gray-800">{to}</span>
+                                        <span className="font-medium text-gray-800">
+                                          {to}
+                                        </span>
                                       )}
                                     </div>
                                     {first && (
-                                      <div className="mt-0.5 text-xs text-gray-500">{fmtDateTime(first.changedAt)}</div>
+                                      <div className="mt-0.5 text-xs text-gray-500">
+                                        {fmtDateTime(first.changedAt)}
+                                      </div>
                                     )}
                                   </div>
 
@@ -592,14 +772,20 @@ export default function HistoryPage() {
                                     <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
                                       {count} mvt
                                     </span>
-                                    {canAggregate && (
-                                      <button
-                                        onClick={() => openDetails(reference, day, from, to, uniqIds)}
-                                        className="rounded-lg border px-3 py-1.5 text-xs hover:bg-white"
-                                      >
-                                        Voir détails ({uniqIds.length})
-                                      </button>
-                                    )}
+                                    <button
+                                      onClick={() =>
+                                        openDetails(
+                                          reference,
+                                          day,
+                                          from,
+                                          to,
+                                          payload.items
+                                        )
+                                      }
+                                      className="rounded-lg border px-3 py-1.5 text-xs hover:bg-white"
+                                    >
+                                      Voir détails
+                                    </button>
                                   </div>
                                 </div>
                               );
@@ -613,17 +799,17 @@ export default function HistoryPage() {
           </AnimatePresence>
         </div>
       ) : (
-        /* --- VUE PAR RÉFÉRENCE : Référence -> Jour -> Parcours --- */
+        /* --- VUE PAR RÉFÉRENCE : Réf -> Jour -> Parcours --- */
         <div className="space-y-6">
           <AnimatePresence>
             {sortedRefs.map((reference) => {
               const byDay = groupedByReference[reference];
               const total = Object.values(byDay).reduce(
-                (acc, byFT) => acc + Object.values(byFT).reduce((s, v) => s + v.items.length, 0),
+                (acc, byFT) =>
+                  acc + Object.values(byFT).reduce((s, v) => s + v.items.length, 0),
                 0
               );
 
-              // Aplatir tous les items de la ref pour le résumé
               const all = Object.values(byDay).flatMap((byFT) =>
                 Object.values(byFT).flatMap((v) => v.items)
               );
@@ -639,8 +825,12 @@ export default function HistoryPage() {
                   className="rounded-2xl bg-white p-5 shadow ring-1 ring-gray-200"
                 >
                   <div className="mb-1 flex items-center justify-between">
-                    <div className="text-sm font-semibold text-gray-900">{reference}</div>
-                    <div className="text-xs text-gray-500">{total} mouvement(s)</div>
+                    <div className="text-sm font-semibold text-gray-900">
+                      {reference}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {total} mouvement(s)
+                    </div>
                   </div>
 
                   {/* Résumé affectée / délivrée */}
@@ -667,10 +857,19 @@ export default function HistoryPage() {
                   <div className="space-y-4">
                     {Object.entries(byDay)
                       .sort(([a], [b]) =>
-                        timelineOrder === "desc" ? (a < b ? 1 : -1) : (a < b ? -1 : 1)
+                        timelineOrder === "desc"
+                          ? a < b
+                            ? 1
+                            : -1
+                          : a < b
+                          ? -1
+                          : 1
                       )
                       .map(([day, byFT]) => (
-                        <div key={day} className="rounded-xl border border-gray-100 p-4">
+                        <div
+                          key={day}
+                          className="rounded-xl border border-gray-100 p-4"
+                        >
                           <div className="mb-2 text-xs font-medium text-gray-700">
                             {new Date(day).toLocaleDateString()}
                           </div>
@@ -681,8 +880,6 @@ export default function HistoryPage() {
                               .map(([ft, payload]) => {
                                 const [from, to] = ft.split("||");
                                 const count = payload.items.length;
-                                const uniqIds = payload.machineIds;
-                                const canAggregate = uniqIds.length > 1;
                                 const delivered = isDeliveredTo(to);
 
                                 return (
@@ -690,18 +887,26 @@ export default function HistoryPage() {
                                     key={ft}
                                     className={[
                                       "flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3",
-                                      delivered ? "border-indigo-200 bg-indigo-50" : "border-gray-100 bg-gray-50",
+                                      delivered
+                                        ? "border-indigo-200 bg-indigo-50"
+                                        : "border-gray-100 bg-gray-50",
                                     ].join(" ")}
                                   >
                                     <div className="min-w-0 text-sm">
-                                      <span className="font-medium text-gray-800">{from || "—"}</span>
-                                      <span className="mx-2 text-gray-400">→</span>
+                                      <span className="font-medium text-gray-800">
+                                        {from || "—"}
+                                      </span>
+                                      <span className="mx-2 text-gray-400">
+                                        →
+                                      </span>
                                       {delivered ? (
                                         <span className="inline-flex items-center rounded-full bg-indigo-600 px-2 py-0.5 text-xs font-semibold text-white">
                                           DÉLIVRÉE
                                         </span>
                                       ) : (
-                                        <span className="font-medium text-gray-800">{to}</span>
+                                        <span className="font-medium text-gray-800">
+                                          {to}
+                                        </span>
                                       )}
                                     </div>
 
@@ -709,14 +914,20 @@ export default function HistoryPage() {
                                       <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
                                         {count} mvt
                                       </span>
-                                      {canAggregate && (
-                                        <button
-                                          onClick={() => openDetails(reference, day, from, to, uniqIds)}
-                                          className="rounded-lg border px-3 py-1.5 text-xs hover:bg-white"
-                                        >
-                                          Voir détails ({uniqIds.length})
-                                        </button>
-                                      )}
+                                      <button
+                                        onClick={() =>
+                                          openDetails(
+                                            reference,
+                                            day,
+                                            from,
+                                            to,
+                                            payload.items
+                                          )
+                                        }
+                                        className="rounded-lg border px-3 py-1.5 text-xs hover:bg-white"
+                                      >
+                                        Voir détails
+                                      </button>
                                     </div>
                                   </div>
                                 );
@@ -752,8 +963,10 @@ export default function HistoryPage() {
             open={modalOpen}
             onClose={() => setModalOpen(false)}
             title={modalTitle}
-            machineIds={modalIds}
+            items={modalItems}
             machineIndex={machineIndex}
+            onDeleted={handleDeleted}
+            canDelete={canDelete}
           />
         )}
       </AnimatePresence>

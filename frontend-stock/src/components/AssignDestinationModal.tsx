@@ -1,4 +1,6 @@
+// src/components/AssignDestinationModal.tsx
 import { useEffect, useMemo, useState } from "react";
+import { api } from "../lib/api";
 
 type Props = {
   open: boolean;
@@ -62,7 +64,12 @@ const LEVEL1 = [
   { key: TPI_YOUSSOUIFIA, label: TPI_YOUSSOUIFIA, type: "TPI" as const },
 ];
 
-export default function AssignDestinationModal({ open, onClose, machineId, onAssigned }: Props) {
+export default function AssignDestinationModal({
+  open,
+  onClose,
+  machineId,
+  onAssigned,
+}: Props) {
   const [lv1, setLv1] = useState<string>("");
   const [lv2, setLv2] = useState<string>("");
   const [lv3, setLv3] = useState<string>("");
@@ -70,19 +77,28 @@ export default function AssignDestinationModal({ open, onClose, machineId, onAss
 
   useEffect(() => {
     if (!open) {
-      setLv1(""); setLv2(""); setLv3(""); setSubmitting(false);
+      setLv1("");
+      setLv2("");
+      setLv3("");
+      setSubmitting(false);
     }
   }, [open]);
 
   const isCA = useMemo(() => lv1 === COUR_APPEL, [lv1]);
-  const isTPI = useMemo(() => [TPI_SAFI, TPI_ESSAOUIRA, TPI_YOUSSOUIFIA].includes(lv1), [lv1]);
+  const isTPI = useMemo(
+    () => [TPI_SAFI, TPI_ESSAOUIRA, TPI_YOUSSOUIFIA].includes(lv1),
+    [lv1]
+  );
 
-  // 2e niveau (sous-entité d’un TPI : soit “Tribunal lui-même”, soit centres)
+  // 2e niveau (sous-entité d’un TPI)
   const level2Options = useMemo(() => {
-    if (isCA) return ["— Composante de la Cour —"]; // placeholder
-    if (lv1 === TPI_SAFI) return ["Tribunal", ...CENTRES_SAFI.map(c => `Centre Juge Résident ${c}`)];
-    if (lv1 === TPI_ESSAOUIRA) return ["Tribunal", ...CENTRES_ESSAOUIRA.map(c => `Centre Juge Résident ${c}`)];
-    if (lv1 === TPI_YOUSSOUIFIA) return ["Tribunal", ...CENTRES_YOUSSOUIFIA.map(c => `Centre Juge Résident ${c}`)];
+    if (isCA) return ["— Composante de la Cour —"];
+    if (lv1 === TPI_SAFI)
+      return ["Tribunal", ...CENTRES_SAFI.map((c) => `Centre Juge Résident ${c}`)];
+    if (lv1 === TPI_ESSAOUIRA)
+      return ["Tribunal", ...CENTRES_ESSAOUIRA.map((c) => `Centre Juge Résident ${c}`)];
+    if (lv1 === TPI_YOUSSOUIFIA)
+      return ["Tribunal", ...CENTRES_YOUSSOUIFIA.map((c) => `Centre Juge Résident ${c}`)];
     return [];
   }, [lv1, isCA]);
 
@@ -95,34 +111,28 @@ export default function AssignDestinationModal({ open, onClose, machineId, onAss
   }, [isCA, isTPI, lv2]);
 
   const buildDestinationName = () => {
-    // CA : "Cour d'appel de Safi – <comp>"
     if (isCA && lv3) return `${COUR_APPEL} – ${lv3}`;
-
-    // TPI : Tribunal : "TPI Safi – <comp>"
     if (isTPI && lv2 === "Tribunal" && lv3) return `${lv1} – ${lv3}`;
-
-    // TPI : Centre : "Centre Juge Résident <x> – <comp>"
-    if (isTPI && lv2.startsWith("Centre Juge Résident") && lv3) return `${lv2} – ${lv3}`;
-
+    if (isTPI && lv2.startsWith("Centre Juge Résident") && lv3)
+      return `${lv2} – ${lv3}`;
     return "";
   };
 
-  // — API helpers —
+  // — API helpers (utilise le wrapper api) —
   const findDestination = async (name: string) => {
-    const res = await fetch("/destinations");
-    if (!res.ok) return null;
-    const list = await res.json();
-    return (list as { id:number; name:string }[]).find(d => d.name.trim().toLowerCase() === name.trim().toLowerCase()) ?? null;
+    const list = await api<{ id: number; name: string }[]>("/destinations");
+    return (
+      list.find(
+        (d) => d.name.trim().toLowerCase() === name.trim().toLowerCase()
+      ) ?? null
+    );
   };
 
   const createDestination = async (name: string) => {
-    const res = await fetch("/destinations", {
+    return await api<{ id: number; name: string }>("/destinations", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (!res.ok) throw new Error("Création destination échouée");
-    return await res.json() as { id:number; name:string };
   };
 
   const ensureDestinationId = async (name: string) => {
@@ -142,15 +152,13 @@ export default function AssignDestinationModal({ open, onClose, machineId, onAss
     try {
       setSubmitting(true);
       const destinationId = await ensureDestinationId(fullName);
-      const res = await fetch(`/machines/${machineId}/assign`, {
+      await api(`/machines/${machineId}/assign`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ destinationId }),
       });
-      if (!res.ok) throw new Error("Affectation échouée");
       onAssigned?.();
       onClose();
-    } catch (e:any) {
+    } catch (e: any) {
       alert(e?.message || "Erreur réseau");
     } finally {
       setSubmitting(false);
@@ -164,7 +172,12 @@ export default function AssignDestinationModal({ open, onClose, machineId, onAss
       <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-lg font-semibold">Affecter par hiérarchie (Safi)</h3>
-          <button className="rounded p-1 text-gray-500 hover:bg-gray-100" onClick={onClose}>✕</button>
+          <button
+            className="rounded p-1 text-gray-500 hover:bg-gray-100"
+            onClick={onClose}
+          >
+            ✕
+          </button>
         </div>
 
         <div className="space-y-3">
@@ -174,10 +187,18 @@ export default function AssignDestinationModal({ open, onClose, machineId, onAss
             <select
               className="mt-1 w-full rounded border p-2"
               value={lv1}
-              onChange={e => { setLv1(e.target.value); setLv2(""); setLv3(""); }}
+              onChange={(e) => {
+                setLv1(e.target.value);
+                setLv2("");
+                setLv3("");
+              }}
             >
               <option value="">-- Sélectionner --</option>
-              {LEVEL1.map(opt => <option key={opt.key} value={opt.key}>{opt.label}</option>)}
+              {LEVEL1.map((opt) => (
+                <option key={opt.key} value={opt.key}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -188,25 +209,36 @@ export default function AssignDestinationModal({ open, onClose, machineId, onAss
               <select
                 className="mt-1 w-full rounded border p-2"
                 value={lv2}
-                onChange={e => { setLv2(e.target.value); setLv3(""); }}
+                onChange={(e) => {
+                  setLv2(e.target.value);
+                  setLv3("");
+                }}
               >
                 <option value="">-- Sélectionner --</option>
-                {level2Options.map(x => <option key={x} value={x}>{x}</option>)}
+                {level2Options.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
               </select>
             </label>
           )}
 
           {/* Niveau 3 (composante) */}
-          {((isCA) || (isTPI && lv2)) && (
+          {(isCA || (isTPI && lv2)) && (
             <label className="block text-sm">
               Composante
               <select
                 className="mt-1 w-full rounded border p-2"
                 value={lv3}
-                onChange={e => setLv3(e.target.value)}
+                onChange={(e) => setLv3(e.target.value)}
               >
                 <option value="">-- Sélectionner --</option>
-                {level3Options.map(x => <option key={x} value={x}>{x}</option>)}
+                {level3Options.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
               </select>
             </label>
           )}
@@ -219,7 +251,12 @@ export default function AssignDestinationModal({ open, onClose, machineId, onAss
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded border px-4 py-2 hover:bg-gray-50">Annuler</button>
+          <button
+            onClick={onClose}
+            className="rounded border px-4 py-2 hover:bg-gray-50"
+          >
+            Annuler
+          </button>
           <button
             onClick={handleAssign}
             disabled={submitting || !buildDestinationName()}
