@@ -4,19 +4,47 @@ import { PrismaService } from '../prisma/prisma.service';
 const REPAIR_KEYS = ['réparation', 'en réparation', 'reparation'];
 
 const isRepair = (s?: string | null) =>
-  !!s && REPAIR_KEYS.some(k => (s || '').toLowerCase().includes(k));
+  !!s && REPAIR_KEYS.some((k) => (s || '').toLowerCase().includes(k));
 
 @Injectable()
 export class MachineService {
   constructor(private prisma: PrismaService) {}
+
+  private destinationLabel(destination: any): string {
+    if (!destination) return 'Stock';
+    const etab = destination.etablissement?.nom ?? '';
+    const service = destination.service?.nom ?? '';
+    const bureau = destination.bureau ?? '';
+    return [etab, service, bureau].filter(Boolean).join(' - ') || 'Destination';
+  }
+
   create(data: {
     type: string;
-    reference: string;
-    numSerie: string;
-    numInventaire: string;
+    reference?: string;
+    numSerie?: string;
+    numInventaire?: string;
+    marque?: string;
+    referenceMarche?: string;
+    etat?: string;
+    destinationId?: number | null;
+    affectataireId?: number | null;
   }) {
     return this.prisma.machine.create({
-      data: { ...data, status: 'stocké' },
+      data: {
+        ...data,
+        status: data.destinationId ? 'affectée' : 'stocké',
+      },
+    });
+  }
+
+  private async createHistory(machineId: number, fromValue: string | null, toValue: string, actionType = 'MOUVEMENT') {
+    return this.prisma.history.create({
+      data: {
+        machineId,
+        actionType,
+        fromValue,
+        toValue,
+      },
     });
   }
 
@@ -30,53 +58,79 @@ export class MachineService {
       !!s && (s.toLowerCase() === 'stock' || s.toLowerCase().includes('stock'));
     const isDelivered = (s?: string | null) =>
       !!s && (s.toLowerCase().includes('machines délivrées') || s.toLowerCase().includes('délivr'));
-    const isRepair = (s?: string | null) =>
-      !!s && (s.toLowerCase().includes('réparation') || s.toLowerCase().includes('reparation'));
 
     let lastMeaningfulTo = '';
 
     for (const ev of hist) {
-      const to = (ev.to || '').trim();
-      if (isRepair(to)) {
-        // entrée en réparation: la source est ce qu'on a mémorisé juste avant
-        return lastMeaningfulTo || '';
-      }
+      const to = (ev.toValue || '').trim();
+      if (isRepair(to)) return lastMeaningfulTo || '';
       if (to && !isStock(to) && !isRepair(to) && !isDelivered(to)) {
         lastMeaningfulTo = to;
       }
     }
     return lastMeaningfulTo || '';
   }
+
   findAll() {
-    return this.prisma.machine.findMany({ include: { destination: true } });
+    return this.prisma.machine.findMany({
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+        affectataire: true,
+      },
+    });
   }
 
   findStock() {
     return this.prisma.machine.findMany({
       where: { status: 'stocké', destinationId: null },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+        affectataire: true,
+      },
     });
   }
 
   findByDestination(destinationId: number) {
-    return this.prisma.machine.findMany({ where: { destinationId } });
+    return this.prisma.machine.findMany({
+      where: { destinationId },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+        affectataire: true,
+      },
+    });
   }
 
-  /** -------- Délivrées -------- */
   findDelivered() {
     return this.prisma.machine.findMany({
       where: { status: 'délivrée' },
       include: {
         destination: {
-          select: {
-            id: true,
-            name: true,
+          include: {
+            etablissement: true,
+            service: true,
           },
         },
         histories: {
           orderBy: { changedAt: 'desc' },
           take: 1,
           select: {
-            from: true,
+            fromValue: true,
+            toValue: true,
             changedAt: true,
           },
         },
@@ -85,10 +139,48 @@ export class MachineService {
   }
 
   async assignDestination(id: number, destinationId: number) {
-    return this.prisma.machine.update({
+    const before = await this.prisma.machine.findUnique({
+      where: { id },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+      },
+    });
+    if (!before) throw new NotFoundException('Machine introuvable');
+
+    const dest = await this.prisma.destination.findUnique({
+      where: { id: destinationId },
+      include: {
+        etablissement: true,
+        service: true,
+      },
+    });
+    if (!dest) throw new NotFoundException('Destination introuvable');
+
+    const from = this.destinationLabel(before.destination);
+    const to = this.destinationLabel(dest);
+
+    const updated = await this.prisma.machine.update({
       where: { id },
       data: { destinationId, status: 'affectée' },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+        affectataire: true,
+      },
     });
+
+    await this.createHistory(id, from, to, 'AFFECTATION');
+
+    return updated;
   }
 
   async updateDeliveredMachines(years = 5) {
@@ -100,14 +192,20 @@ export class MachineService {
         status: { not: 'délivrée' },
         histories: { some: { changedAt: { lte: thresholdDate } } },
       },
-      include: { destination: true },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+      },
     });
 
     for (const m of machinesToDeliver) {
-      const fromName = m.destination?.name || 'Affectée';
-      await this.prisma.history.create({
-        data: { machineId: m.id, from: fromName, to: 'Machines délivrées' },
-      });
+      const fromName = this.destinationLabel(m.destination);
+      await this.createHistory(m.id, fromName, 'Machines délivrées', 'DELIVREE');
+
       await this.prisma.machine.update({
         where: { id: m.id },
         data: { status: 'délivrée' },
@@ -123,16 +221,20 @@ export class MachineService {
   async markAsDelivered(id: number) {
     const machine = await this.prisma.machine.findUnique({
       where: { id },
-      include: { destination: true },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+      },
     });
-    if (!machine) throw new Error('Machine introuvable');
+    if (!machine) throw new NotFoundException('Machine introuvable');
 
-    const fromName = machine.destination?.name || 'Affectée';
-    const toName = 'Machines délivrées';
+    const fromName = this.destinationLabel(machine.destination);
 
-    await this.prisma.history.create({
-      data: { machineId: id, from: fromName, to: toName },
-    });
+    await this.createHistory(id, fromName, 'Machines délivrées', 'DELIVREE');
 
     return this.prisma.machine.update({
       where: { id },
@@ -140,11 +242,7 @@ export class MachineService {
     });
   }
 
-  /** =====================  RÉPARATION  ===================== */
-
-  /** Liste des machines en réparation (sans `mode: 'insensitive'`) */
   findRepairs() {
-    // Compat Prisma: on duplique les variantes au lieu d’un filtre insensible
     return this.prisma.machine.findMany({
       where: {
         OR: [
@@ -158,50 +256,65 @@ export class MachineService {
         ],
       },
       include: {
-        destination: true,
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+        affectataire: true,
         histories: { orderBy: { changedAt: 'asc' } },
       },
     });
   }
 
-    async finishRepair(id: number) {
+  async finishRepair(id: number) {
     const machine = await this.prisma.machine.findUnique({
       where: { id },
-      include: { destination: true },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+      },
     });
-    if (!machine) throw new Error('Machine introuvable');
+    if (!machine) throw new NotFoundException('Machine introuvable');
 
-    // 1) retrouver la juridiction source à partir de l’historique
     const sourceName = await this.getSourceBeforeRepair(id);
     if (!sourceName) throw new Error('Source introuvable dans l’historique');
 
-    // 2) retrouver la destination par son "name" (ex: "TPI Safi – Greffe")
     const dest = await this.prisma.destination.findFirst({
-      where: { name: sourceName },
-    });
-    if (!dest) throw new Error(`Destination "${sourceName}" introuvable`);
-
-    // 3) traçabilité: de "Réparation" -> source
-    await this.prisma.history.create({
-      data: {
-        machineId: id,
-        from: 'Réparation',
-        to: dest.name,
+      where: { bureau: sourceName },
+      include: {
+        etablissement: true,
+        service: true,
       },
     });
 
-    // 4) MAJ machine: statut + rattachement à la destination
+    if (!dest) throw new Error(`Destination "${sourceName}" introuvable`);
+
+    const to = this.destinationLabel(dest);
+
+    await this.createHistory(id, 'Réparation', to, 'FIN_REPARATION');
+
     return this.prisma.machine.update({
       where: { id },
       data: {
         status: 'affectée',
         destinationId: dest.id,
       },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+      },
     });
   }
-
-
-  /** ======================================================== */
 
   async update(
     id: number,
@@ -210,27 +323,33 @@ export class MachineService {
       reference: string;
       numSerie: string;
       numInventaire: string;
-      status: 'stocké' | 'affectée' | 'délivrée' | string;
+      marque: string;
+      referenceMarche: string;
+      etat: string;
+      status: string;
       destinationId: number | null;
+      affectataireId: number | null;
     }>,
   ) {
-    const { type, reference, numSerie, numInventaire, status, destinationId } =
-      data;
+    const current = await this.prisma.machine.findUnique({
+      where: { id },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+      },
+    });
+    if (!current) throw new NotFoundException('Machine introuvable');
 
     if (data.status && data.status.toLowerCase().includes('réparation')) {
-      const m = await this.prisma.machine.findUnique({
-        where: { id },
-        include: { destination: true },
-      });
-      const fromName = m?.destination?.name || 'Stock';
+      const fromName = this.destinationLabel(current.destination);
 
-      // créer l’évènement "entrée en réparation"
-      await this.prisma.history.create({
-        data: { machineId: id, from: fromName, to: 'Réparation' },
-      });
+      await this.createHistory(id, fromName, 'Réparation', 'REPARATION');
 
-      // détacher de la destination pendant la réparation
-      if (m?.destinationId) {
+      if (current.destinationId) {
         data.destinationId = null;
       }
     }
@@ -238,12 +357,25 @@ export class MachineService {
     return this.prisma.machine.update({
       where: { id },
       data: {
-        ...(type !== undefined ? { type } : {}),
-        ...(reference !== undefined ? { reference } : {}),
-        ...(numSerie !== undefined ? { numSerie } : {}),
-        ...(numInventaire !== undefined ? { numInventaire } : {}),
-        ...(status !== undefined ? { status } : {}),
-        ...(destinationId !== undefined ? { destinationId } : {}),
+        ...(data.type !== undefined ? { type: data.type } : {}),
+        ...(data.reference !== undefined ? { reference: data.reference } : {}),
+        ...(data.numSerie !== undefined ? { numSerie: data.numSerie } : {}),
+        ...(data.numInventaire !== undefined ? { numInventaire: data.numInventaire } : {}),
+        ...(data.marque !== undefined ? { marque: data.marque } : {}),
+        ...(data.referenceMarche !== undefined ? { referenceMarche: data.referenceMarche } : {}),
+        ...(data.etat !== undefined ? { etat: data.etat } : {}),
+        ...(data.status !== undefined ? { status: data.status } : {}),
+        ...(data.destinationId !== undefined ? { destinationId: data.destinationId } : {}),
+        ...(data.affectataireId !== undefined ? { affectataireId: data.affectataireId } : {}),
+      },
+      include: {
+        destination: {
+          include: {
+            etablissement: true,
+            service: true,
+          },
+        },
+        affectataire: true,
       },
     });
   }
@@ -255,43 +387,19 @@ export class MachineService {
 
   async bulkDelete(ids: number[]) {
     if (!ids.length) return { deleted: 0 };
-    await this.prisma.history.deleteMany({ where: { machineId: { in: ids } } });
+
+    await this.prisma.history.deleteMany({
+      where: { machineId: { in: ids } },
+    });
+
     const res = await this.prisma.machine.deleteMany({
       where: { id: { in: ids } },
     });
+
     return { deleted: res.count };
   }
+
   async assign(id: number, destinationId: number) {
-    const dest = await this.prisma.destination.findUnique({
-      where: { id: destinationId },
-      select: { id: true, name: true },
-    });
-    if (!dest) throw new NotFoundException('Destination introuvable');
-
-    const before = await this.prisma.machine.findUnique({
-      where: { id },
-      include: { destination: { select: { name: true } } },
-    });
-    if (!before) throw new NotFoundException('Machine introuvable');
-
-    const from = before.destination?.name ?? 'stock';
-    const to = dest.name;
-
-    // statut : adapte la valeur à tes enums/strings (ex: 'affectee', sans accent)
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const m = await tx.machine.update({
-        where: { id },
-        data: { destinationId, status: 'affectee' },
-        include: { destination: true },
-      });
-
-      await tx.history.create({
-        data: { machineId: id, from, to },
-      });
-
-      return m;
-    });
-
-    return updated;
+    return this.assignDestination(id, destinationId);
   }
 }

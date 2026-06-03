@@ -8,41 +8,111 @@ datasource db {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique @db.VarChar(255)
-  password String   @db.VarChar(255)
-  role         String   @default("USER") @db.VarChar(20)
-  createdAt    DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  email     String   @unique @db.VarChar(255)
+  password  String   @db.VarChar(255)
+  role      String   @default("USER") @db.VarChar(20)
+  createdAt DateTime @default(now())
+
+  histories History[]
 }
 
+model Etablissement {
+  id        Int      @id @default(autoincrement())
+  nom       String   @unique @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  services      Service[]
+  destinations  Destination[]
+  affectataires Affectataire[]
+}
+
+model Service {
+  id              Int      @id @default(autoincrement())
+  nom             String   @db.VarChar(255)
+  etablissementId Int
+  createdAt       DateTime @default(now())
+
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  destinations  Destination[]
+  affectataires Affectataire[]
+
+  @@unique([nom, etablissementId])
+}
 
 model Destination {
-  id       Int           @id @default(autoincrement())
-  name     String
-  parentId Int?
-  parent   Destination?  @relation("SubDestinations", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  children Destination[] @relation("SubDestinations")
+  id              Int      @id @default(autoincrement())
+  etablissementId Int
+  serviceId       Int?
+  bureau          String?  @db.VarChar(255)
+  createdAt       DateTime @default(now())
+
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  service       Service?      @relation(fields: [serviceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
   machines Machine[]
+
+  @@unique([etablissementId, bureau])
+}
+
+model Affectataire {
+  id              Int      @id @default(autoincrement())
+  nom             String   @db.VarChar(255)
+  type            String   @default("AUTRE") @db.VarChar(50)
+  etablissementId Int
+  serviceId       Int?
+  createdAt       DateTime @default(now())
+
+  etablissement Etablissement @relation(fields: [etablissementId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  service       Service?      @relation(fields: [serviceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  machines Machine[]
+
+  @@unique([nom, etablissementId, serviceId])
 }
 
 model Machine {
-  id            Int          @id @default(autoincrement())
-  type          String
-  reference     String
-  numSerie      String
-  numInventaire String
-  status        String       @default("en_stock")
-  createdAt     DateTime     @default(now())
-  destinationId Int?
-  destination   Destination? @relation(fields: [destinationId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  histories     History[]
+  id              Int      @id @default(autoincrement())
+  type            String   @db.VarChar(50)
+
+  marque          String?  @db.VarChar(255)
+  reference       String?  @db.VarChar(255)
+  numSerie        String?  @unique @db.VarChar(255)
+  numInventaire   String?  @unique @db.VarChar(255)
+  referenceMarche String?  @db.VarChar(255)
+
+  etat            String?  @db.VarChar(100)
+  status          String   @default("EN_STOCK") @db.VarChar(50)
+
+  observation     String?  @db.NVarChar(Max)
+  sourceFile      String?  @db.VarChar(255)
+
+  destinationId   Int?
+  affectataireId  Int?
+
+  destination   Destination?  @relation(fields: [destinationId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  affectataire  Affectataire? @relation(fields: [affectataireId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  histories       History[]
 }
 
 model History {
-  id        Int      @id @default(autoincrement())
-  machineId Int
-  machine   Machine  @relation(fields: [machineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  from      String?
-  to        String
-  changedAt DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  machineId   Int
+  actionType  String   @db.VarChar(50)
+
+  fromValue   String?  @db.VarChar(255)
+  toValue     String?  @db.VarChar(255)
+
+  commentaire String?  @db.NVarChar(Max)
+
+  createdById Int?
+  changedAt   DateTime @default(now())
+
+  machine   Machine @relation(fields: [machineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull, onUpdate: NoAction)
 }

@@ -16,25 +16,26 @@ export class HistoryService {
           },
         },
       },
-      orderBy: {
-        changedAt: 'desc',
-      },
+      orderBy: { changedAt: 'desc' },
     });
   }
 
   async create(data: { machineId: number; from?: string | null; to: string }) {
-
-
-    return this.prisma.history.create({ data });
+    return this.prisma.history.create({
+      data: {
+        machineId: data.machineId,
+        actionType: 'MOUVEMENT',
+        fromValue: data.from ?? null,
+        toValue: data.to,
+      },
+    });
   }
 
   async remove(id: number) {
     try {
       await this.prisma.history.delete({ where: { id } });
     } catch (e: any) {
-      if (e?.code === 'P2025') {
-        throw new NotFoundException('Mouvement introuvable');
-      }
+      if (e?.code === 'P2025') throw new NotFoundException('Mouvement introuvable');
       throw e;
     }
   }

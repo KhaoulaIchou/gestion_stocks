@@ -31,16 +31,14 @@ services:
       - JWT_SECRET=changeme
       - JWT_EXPIRES=7d
     ports:
-      - "3000:3000"
+      - "4000:3000"
     restart: unless-stopped
     command: >
       bash -lc "
-        until </dev/tcp/mssql/1433; do
-          echo 'attente mssql...'; sleep 1;
-        done;
+        sleep 20 &&
         npx prisma generate &&
-        npx prisma migrate deploy &&
-        npm run build &&           # <--- AJOUT
+        npx prisma db push &&
+        npm run build &&
         npm run start:prod
       "
 
