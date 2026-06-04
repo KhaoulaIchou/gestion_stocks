@@ -5,8 +5,9 @@ import DestinationList from "./components/DestinationList";
 import DelivreeMachineList from "./components/DelivreeMachineList";
 import HistoryList from "./components/HistoryList";
 import Login from "./components/Login";
-import Navbar from "./components/Navbar";
+import Navbar from "./components/NavBar";
 import ProtectedRoute from "./ProtectedRoute";
+import MachinesAffectees from "./components/MachinesAffectees";
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
             <Route path="/destinations" element={<ProtectedRoute><DestinationList /></ProtectedRoute>} />
             <Route path="/history" element={<ProtectedRoute><HistoryList /></ProtectedRoute>} />
             <Route path="/delivrees" element={<ProtectedRoute><DelivreeMachineList /></ProtectedRoute>} />
+            <Route path="/machines-affectees" element={<MachinesAffectees />} />
           </Routes>
         </main>
       </div>

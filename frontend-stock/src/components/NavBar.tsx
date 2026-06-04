@@ -86,6 +86,12 @@ export default function Navbar() {
             Historique
           </NavLink>
           <NavLink
+            to="/machines-affectees"
+            className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-gray-100"
+          >
+            Machines Affectées
+          </NavLink>
+          <NavLink
             to="/delivrees"
             className={({ isActive }) =>
               `transition ${isActive ? "text-indigo-600 font-semibold" : "text-slate-600 hover:text-slate-900"}`

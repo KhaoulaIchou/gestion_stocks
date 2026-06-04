@@ -1,8 +1,6 @@
 // src/components/MachineStockList.tsx
 import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import * as XLSX from "xlsx";
-import AddMachineModal from "./AddMachineModal";
-import EditMachineModal from "./EditMachineModal";
 import AssignDestinationModal from "./AssignDestinationModal";
 import { api } from "../lib/api";
 
@@ -11,16 +9,35 @@ type Role = "ADMIN" | "MANAGER" | "VIEWER";
 interface Machine {
   id: number;
   type: string;
+  marque?: string | null;
   reference: string;
   numSerie: string;
   numInventaire: string;
+  referenceMarche?: string | null;
+  etat?: string | null;
   createdAt: string;
   status: string;
   destinationId?: number | null;
+  affectataireId?: number | null;
 
-  marque?: string | null;
-  referenceMarche?: string | null;
-  etat?: string | null;
+  destination?: {
+    id: number;
+    bureau?: string | null;
+    etablissement?: {
+      id: number;
+      nom: string;
+    } | null;
+    service?: {
+      id: number;
+      nom: string;
+    } | null;
+  } | null;
+
+  affectataire?: {
+    id: number;
+    nom: string;
+    type: string;
+  } | null;
 }
 
 const RepairMachinesSection = lazy(() => import("./RepairMachinesSection"));
@@ -41,9 +58,6 @@ const NORMALIZE: Record<string, string> = {
   unitecentrale: "unité centrale",
   uc: "unité centrale",
 
-  pc: "pc portable",
-  "pc portable": "pc portable",
-
   imprimante: "imprimante",
 
   écran: "écran",
@@ -53,6 +67,9 @@ const NORMALIZE: Record<string, string> = {
 
   telephone: "téléphone",
   téléphone: "téléphone",
+
+  pc: "pc portable",
+  "pc portable": "pc portable",
 };
 
 function readRoleFromStorage(): Role {
@@ -78,21 +95,25 @@ function normalizedType(type: string) {
   return NORMALIZE[key] || key;
 }
 
-function isStockMachine(machine: Machine) {
-  const status = String(machine.status || "").trim().toLowerCase();
-
-  const isStockStatus =
-    status === "stocké" ||
-    status === "stocke" ||
-    status === "en_stock" ||
-    status === "stock";
-
-  return isStockStatus && !machine.destinationId;
+function destinationLabel(machine: Machine) {
+  return (
+    [
+      machine.destination?.etablissement?.nom,
+      machine.destination?.service?.nom,
+      machine.destination?.bureau,
+    ]
+      .filter(Boolean)
+      .join(" - ") || "Stock"
+  );
 }
 
-const MachineStockList = () => {
+function affectataireLabel(machine: Machine) {
+  return machine.affectataire?.nom || "—";
+}
+
+export default function MachinesAffectees() {
   const [machines, setMachines] = useState<Machine[]>([]);
-  const [activeCat, setActiveCat] = useState<string>(CATEGORIES[0].key);
+  const [activeCat, setActiveCat] = useState<string>("unité centrale");
   const [openAdd, setOpenAdd] = useState(false);
   const [search, setSearch] = useState("");
   const [assignTargetId, setAssignTargetId] = useState<number | null>(null);
@@ -100,10 +121,6 @@ const MachineStockList = () => {
   const [banner, setBanner] = useState<string | null>(null);
   const [showDeleteForId, setShowDeleteForId] = useState<number | null>(null);
   const [role, setRole] = useState<Role>("VIEWER");
-
-  useEffect(() => {
-    setRole(readRoleFromStorage());
-  }, []);
 
   const canCreate = role === "ADMIN" || role === "MANAGER";
   const canAssign = role === "ADMIN" || role === "MANAGER";
@@ -114,24 +131,21 @@ const MachineStockList = () => {
     try {
       const data = await api<Machine[]>("/machines");
 
-      // هنا كنخليو غير machines ديال stock:
-      // يعني تزادو من AddMachineModal ومازال ما تعطات لحتى destination
-      const onlyStock = data.filter((machine) => isStockMachine(machine));
-
-      setMachines(onlyStock);
+      // Important:
+      // Ne pas filtrer par status="stocké", car les machines importées sont "affectée".
+      setMachines(data);
     } catch {
       setMachines([]);
     }
   };
 
   useEffect(() => {
+    setRole(readRoleFromStorage());
     loadMachines();
   }, []);
 
   const filteredByCategory = useMemo(() => {
-    return machines.filter(
-      (machine) => normalizedType(machine.type) === activeCat
-    );
+    return machines.filter((machine) => normalizedType(machine.type) === activeCat);
   }, [machines, activeCat]);
 
   const filteredBySearch = useMemo(() => {
@@ -139,20 +153,25 @@ const MachineStockList = () => {
 
     if (!q) return filteredByCategory;
 
-    return filteredByCategory.filter((machine) =>
-      [
+    return filteredByCategory.filter((machine) => {
+      const text = [
         machine.reference,
         machine.numSerie,
         machine.numInventaire,
         machine.marque,
         machine.referenceMarche,
         machine.etat,
-      ].some((value) =>
-        String(value || "")
-          .toLowerCase()
-          .includes(q)
-      )
-    );
+        machine.status,
+        machine.affectataire?.nom,
+        machine.destination?.etablissement?.nom,
+        machine.destination?.service?.nom,
+        machine.destination?.bureau,
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" ");
+
+      return text.includes(q);
+    });
   }, [filteredByCategory, search]);
 
   const deleteOne = async (id: number) => {
@@ -185,7 +204,7 @@ const MachineStockList = () => {
     ).filter((type) => byType[type] && byType[type].length > 0);
 
     allTypes.forEach((typeKey) => {
-      const rows = (byType[typeKey] || []).map((machine) => ({
+      const rows = byType[typeKey].map((machine) => ({
         Référence: machine.reference || "",
         Marque: machine.marque || "",
         "N° Série": machine.numSerie || "",
@@ -193,6 +212,8 @@ const MachineStockList = () => {
         "Référence Marché": machine.referenceMarche || "",
         Etat: machine.etat || "",
         Type: machine.type || "",
+        Destination: destinationLabel(machine),
+        Affectataire: affectataireLabel(machine),
         "Créée le": machine.createdAt
           ? new Date(machine.createdAt).toLocaleString()
           : "",
@@ -211,7 +232,7 @@ const MachineStockList = () => {
       XLSX.utils.book_append_sheet(workbook, worksheet, safeName || "Divers");
     });
 
-    XLSX.writeFile(workbook, "machines_stock_par_type.xlsx");
+    XLSX.writeFile(workbook, "machines_par_type.xlsx");
   };
 
   return (
@@ -220,10 +241,10 @@ const MachineStockList = () => {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              Gestion du Stock
+               Machines Affectées
             </h1>
             <p className="mt-1 text-sm text-gray-500">
-              Total en stock : {machines.length}
+              Total machines: {machines.length}
             </p>
           </div>
 
@@ -231,23 +252,11 @@ const MachineStockList = () => {
             <button
               onClick={exportStockExcel}
               className="rounded-xl border bg-gradient-to-b from-white to-gray-50 px-3 py-2 text-sm font-medium text-gray-800 shadow-sm hover:bg-white"
-              title="Exporter le stock par type"
+              title="Exporter les machines"
             >
-              Export Excel (stock)
+              Export Excel
             </button>
 
-            <button
-              onClick={canCreate ? () => setOpenAdd(true) : undefined}
-              disabled={!canCreate}
-              className={[
-                "rounded-xl px-3 py-2 text-sm font-medium text-white shadow",
-                canCreate
-                  ? "bg-emerald-600 hover:bg-emerald-700"
-                  : "cursor-not-allowed bg-emerald-600 opacity-50",
-              ].join(" ")}
-            >
-              + Nouvelle machine
-            </button>
           </div>
         </div>
 
@@ -269,7 +278,7 @@ const MachineStockList = () => {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Rechercher dans le stock : référence, n° série, n° inventaire"
+                placeholder="Rechercher: référence, série, inventaire, affectataire, service..."
                 className="w-full rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-9 text-sm outline-none focus:border-emerald-400"
               />
 
@@ -320,8 +329,8 @@ const MachineStockList = () => {
                 <th className="px-5 py-3">N° Série</th>
                 <th className="px-5 py-3">N° Inventaire</th>
                 <th className="px-5 py-3">État</th>
-                <th className="px-5 py-3">Créée le</th>
-                <th className="px-5 py-3">Destination</th>
+                <th className="px-5 py-3">Destination / Affectataire</th>
+                <th className="px-5 py-3">Statut</th>
                 <th className="px-5 py-3">Action</th>
               </tr>
             </thead>
@@ -333,7 +342,7 @@ const MachineStockList = () => {
                     colSpan={8}
                     className="px-6 py-8 text-center text-gray-500"
                   >
-                    Aucune machine dans le stock pour cette catégorie.
+                    Aucune machine dans cette catégorie.
                   </td>
                 </tr>
               ) : (
@@ -372,34 +381,27 @@ const MachineStockList = () => {
                       <td className="px-5 py-3">{machine.etat || "—"}</td>
 
                       <td className="px-5 py-3">
-                        {machine.createdAt
-                          ? new Date(machine.createdAt).toLocaleString()
-                          : "—"}
+                        <div className="text-xs text-gray-700">
+                          <div className="font-medium">
+                            {destinationLabel(machine)}
+                          </div>
+                          <div className="text-gray-500">
+                            {affectataireLabel(machine)}
+                          </div>
+                        </div>
+
+                        {canAssign && (
+                          <button
+                            onClick={() => setAssignTargetId(machine.id)}
+                            className="mt-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                            title="Affecter par hiérarchie"
+                          >
+                            Affecter
+                          </button>
+                        )}
                       </td>
 
-                      <td className="px-5 py-3">
-                        <button
-                          onClick={
-                            canAssign
-                              ? () => setAssignTargetId(machine.id)
-                              : undefined
-                          }
-                          disabled={!canAssign}
-                          className={[
-                            "rounded-lg px-3 py-1.5 text-xs font-medium text-white",
-                            canAssign
-                              ? "bg-blue-600 hover:bg-blue-700"
-                              : "cursor-not-allowed bg-blue-600 opacity-50",
-                          ].join(" ")}
-                          title={
-                            canAssign
-                              ? "Affecter par hiérarchie"
-                              : "Permission requise (ADMIN ou MANAGER)"
-                          }
-                        >
-                          Affecter
-                        </button>
-                      </td>
+                      <td className="px-5 py-3">{machine.status || "—"}</td>
 
                       <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
@@ -422,18 +424,9 @@ const MachineStockList = () => {
                             }
                             disabled={!canEdit}
                           >
-                            Modifier
+                            Ajouter aux délivrées
                           </button>
 
-                          {canDelete && showDelete && (
-                            <button
-                              onClick={() => deleteOne(machine.id)}
-                              className="rounded border px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                              title="Supprimer"
-                            >
-                              Supprimer
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -475,22 +468,8 @@ const MachineStockList = () => {
         </Suspense>
       </section>
 
-      <AddMachineModal
-        open={openAdd && canCreate}
-        onClose={() => setOpenAdd(false)}
-        defaultType={activeCat}
-        onCreated={loadMachines}
-      />
 
-      <EditMachineModal
-        open={!!editTarget && canEdit}
-        machine={editTarget}
-        onClose={() => setEditTarget(null)}
-        onSaved={async () => {
-          await loadMachines();
-          setEditTarget(null);
-        }}
-      />
+
 
       <AssignDestinationModal
         open={assignTargetId !== null && canAssign}
@@ -500,6 +479,4 @@ const MachineStockList = () => {
       />
     </div>
   );
-};
-
-export default MachineStockList;
+}

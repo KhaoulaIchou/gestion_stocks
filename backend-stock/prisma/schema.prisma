@@ -78,8 +78,8 @@ model Machine {
 
   marque          String?  @db.VarChar(255)
   reference       String?  @db.VarChar(255)
-  numSerie        String?  @unique @db.VarChar(255)
-  numInventaire   String?  @unique @db.VarChar(255)
+  numSerie        String?  @db.VarChar(255)
+  numInventaire   String?  @db.VarChar(255)
   referenceMarche String?  @db.VarChar(255)
 
   etat            String?  @db.VarChar(100)
