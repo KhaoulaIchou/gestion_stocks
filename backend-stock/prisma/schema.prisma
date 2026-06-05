@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlserver"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -85,7 +85,7 @@ model Machine {
   etat            String?  @db.VarChar(100)
   status          String   @default("EN_STOCK") @db.VarChar(50)
 
-  observation     String?  @db.NVarChar(Max)
+  observation     String?  @db.Text
   sourceFile      String?  @db.VarChar(255)
 
   destinationId   Int?
@@ -108,7 +108,7 @@ model History {
   fromValue   String?  @db.VarChar(255)
   toValue     String?  @db.VarChar(255)
 
-  commentaire String?  @db.NVarChar(Max)
+  commentaire String?  @db.Text
 
   createdById Int?
   changedAt   DateTime @default(now())

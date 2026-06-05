@@ -17,6 +17,14 @@ type MachineLite = {
 const norm = (s: string) =>
   (s || "").toString().trim().toLowerCase().replace(/\s+/g, "");
 
+const todayDateInput = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const AddMachineModal: React.FC<AddMachineModalProps> = ({
   open,
   onClose,
@@ -25,31 +33,44 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
 }) => {
   const [machine, setMachine] = useState({
     type: "",
+    marque: "",
     reference: "",
     numSerie: "",
     numInventaire: "",
   });
+
+  const [dateAjout, setDateAjout] = useState(todayDateInput());
   const [submitting, setSubmitting] = useState(false);
   const [loadingIdx, setLoadingIdx] = useState(false);
   const [existingInv, setExistingInv] = useState<Set<string>>(new Set());
   const [existingSer, setExistingSer] = useState<Set<string>>(new Set());
   const [fetchErr, setFetchErr] = useState<string | null>(null);
 
-  // Charger tous les N° d’inventaire/série existants à l’ouverture
   useEffect(() => {
     if (!open) return;
-    setMachine((m) => ({ ...m, type: defaultType || "" }));
+
+    setMachine((m) => ({
+      ...m,
+      type: defaultType || "",
+    }));
+
+    setDateAjout(todayDateInput());
     setFetchErr(null);
+
     (async () => {
       setLoadingIdx(true);
+
       try {
         const list = await api<MachineLite[] | any[]>("/machines");
+
         const inv = new Set<string>();
         const ser = new Set<string>();
+
         (list || []).forEach((m: any) => {
           if (m?.numInventaire) inv.add(norm(m.numInventaire));
           if (m?.numSerie) ser.add(norm(m.numSerie));
         });
+
         setExistingInv(inv);
         setExistingSer(ser);
       } catch (e: any) {
@@ -62,7 +83,12 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => setMachine({ ...machine, [e.target.name]: e.target.value });
+  ) => {
+    setMachine({
+      ...machine,
+      [e.target.name]: e.target.value,
+    });
+  };
 
   const dupInventaire = useMemo(() => {
     const n = norm(machine.numInventaire);
@@ -76,28 +102,36 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!machine.type.trim()) return alert("Type obligatoire");
     if (!machine.reference.trim()) return alert("Référence obligatoire");
     if (!machine.numSerie.trim()) return alert("N° de série obligatoire");
-    if (!machine.numInventaire.trim()) return alert("N° d’inventaire obligatoire");
+    if (!machine.numInventaire.trim()) {
+      return alert("N° d’inventaire obligatoire");
+    }
+    if (!dateAjout) return alert("Date d’ajout obligatoire");
 
     if (dupInventaire) return alert("Ce N° d’inventaire existe déjà.");
     if (dupSerie) return alert("Ce N° de série existe déjà.");
 
     setSubmitting(true);
+
     try {
-      // Re-vérification côté serveur (concurrence)
       const latest = await api<any[]>("/machines");
+
       const latestInv = new Set<string>();
       const latestSer = new Set<string>();
+
       (latest || []).forEach((m: any) => {
         if (m?.numInventaire) latestInv.add(norm(m.numInventaire));
         if (m?.numSerie) latestSer.add(norm(m.numSerie));
       });
+
       if (latestInv.has(norm(machine.numInventaire))) {
         alert("Ce N° d’inventaire existe déjà (vérification finale).");
         return;
       }
+
       if (latestSer.has(norm(machine.numSerie))) {
         alert("Ce N° de série existe déjà (vérification finale).");
         return;
@@ -107,22 +141,31 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
         method: "POST",
         body: JSON.stringify({
           type: machine.type,
+          marque: machine.marque,
           reference: machine.reference,
           numSerie: machine.numSerie,
           numInventaire: machine.numInventaire,
+
+          // Date choisie par l'utilisateur, sans heure affichée dans le formulaire
+          createdAt: `${dateAjout}T00:00:00.000Z`,
         }),
       });
 
       onCreated?.();
+
       setMachine({
         type: defaultType || "",
+        marque: "",
         reference: "",
         numSerie: "",
         numInventaire: "",
       });
+
+      setDateAjout(todayDateInput());
       onClose();
     } catch (err: any) {
       const msg = err?.message || "Erreur réseau";
+
       if (/unique|duplicat|409/i.test(msg)) {
         alert("Conflit d’unicité (inventaire/série déjà utilisé).");
       } else {
@@ -140,6 +183,7 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold">Ajouter une machine</h3>
+
           <button
             onClick={onClose}
             className="rounded p-1 text-gray-500 hover:bg-gray-100"
@@ -170,6 +214,18 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
           </label>
 
           <label className="block text-sm">
+            Marque
+            <input
+              type="text"
+              name="marque"
+              value={machine.marque}
+              onChange={handleChange}
+              className="mt-1 w-full rounded border p-2"
+              placeholder="Ex: Dell, HP, Canon..."
+            />
+          </label>
+
+          <label className="block text-sm">
             Référence
             <input
               type="text"
@@ -195,14 +251,19 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
                 ].join(" ")}
                 required
               />
+
               {loadingIdx && (
-                <div className="mt-1 text-xs text-gray-500">Vérification…</div>
+                <div className="mt-1 text-xs text-gray-500">
+                  Vérification…
+                </div>
               )}
+
               {fetchErr && (
                 <div className="mt-1 text-xs text-amber-600">
                   {fetchErr} — l’ajout peut échouer si un doublon existe.
                 </div>
               )}
+
               {dupSerie && (
                 <div className="mt-1 text-xs font-medium text-red-600">
                   Ce N° de série existe déjà.
@@ -223,6 +284,7 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
                 ].join(" ")}
                 required
               />
+
               {dupInventaire && (
                 <div className="mt-1 text-xs font-medium text-red-600">
                   Ce N° d’inventaire existe déjà.
@@ -230,6 +292,17 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
               )}
             </label>
           </div>
+
+          <label className="block text-sm">
+            Date d’ajout
+            <input
+              type="date"
+              value={dateAjout}
+              onChange={(e) => setDateAjout(e.target.value)}
+              className="mt-1 w-full rounded border bg-white p-2 text-gray-900"
+              required
+            />
+          </label>
 
           <div className="pt-2 text-right">
             <button
@@ -239,6 +312,7 @@ const AddMachineModal: React.FC<AddMachineModalProps> = ({
             >
               Annuler
             </button>
+
             <button
               type="submit"
               disabled={submitting || dupInventaire || dupSerie || loadingIdx}

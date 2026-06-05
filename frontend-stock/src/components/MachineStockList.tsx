@@ -113,9 +113,6 @@ const MachineStockList = () => {
   const loadMachines = async () => {
     try {
       const data = await api<Machine[]>("/machines");
-
-      // هنا كنخليو غير machines ديال stock:
-      // يعني تزادو من AddMachineModal ومازال ما تعطات لحتى destination
       const onlyStock = data.filter((machine) => isStockMachine(machine));
 
       setMachines(onlyStock);
@@ -145,8 +142,6 @@ const MachineStockList = () => {
         machine.numSerie,
         machine.numInventaire,
         machine.marque,
-        machine.referenceMarche,
-        machine.etat,
       ].some((value) =>
         String(value || "")
           .toLowerCase()
@@ -186,16 +181,14 @@ const MachineStockList = () => {
 
     allTypes.forEach((typeKey) => {
       const rows = (byType[typeKey] || []).map((machine) => ({
-        Référence: machine.reference || "",
         Marque: machine.marque || "",
+        Référence: machine.reference || "",
         "N° Série": machine.numSerie || "",
         "N° Inventaire": machine.numInventaire || "",
-        "Référence Marché": machine.referenceMarche || "",
-        Etat: machine.etat || "",
-        Type: machine.type || "",
-        "Créée le": machine.createdAt
-          ? new Date(machine.createdAt).toLocaleString()
+        "Ajoutée le": machine.createdAt
+          ? new Date(machine.createdAt).toLocaleDateString("fr-FR")
           : "",
+        Type: machine.type || "",
         Statut: machine.status || "",
       }));
 
@@ -222,6 +215,7 @@ const MachineStockList = () => {
             <h1 className="text-2xl font-bold text-gray-900">
               Gestion du Stock
             </h1>
+
             <p className="mt-1 text-sm text-gray-500">
               Total en stock : {machines.length}
             </p>
@@ -269,7 +263,7 @@ const MachineStockList = () => {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Rechercher dans le stock : référence, n° série, n° inventaire"
+                placeholder="Rechercher dans le stock : marque, référence, n° série, n° inventaire"
                 className="w-full rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-9 text-sm outline-none focus:border-emerald-400"
               />
 
@@ -315,13 +309,11 @@ const MachineStockList = () => {
           <table className="w-full text-left text-sm text-gray-700">
             <thead className="bg-gray-50 text-xs uppercase">
               <tr>
-                <th className="px-5 py-3">Référence</th>
                 <th className="px-5 py-3">Marque</th>
+                <th className="px-5 py-3">Référence</th>
                 <th className="px-5 py-3">N° Série</th>
                 <th className="px-5 py-3">N° Inventaire</th>
-                <th className="px-5 py-3">État</th>
-                <th className="px-5 py-3">Créée le</th>
-                <th className="px-5 py-3">Destination</th>
+                <th className="px-5 py-3">Ajoutée le</th>
                 <th className="px-5 py-3">Action</th>
               </tr>
             </thead>
@@ -330,7 +322,7 @@ const MachineStockList = () => {
               {filteredBySearch.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={6}
                     className="px-6 py-8 text-center text-gray-500"
                   >
                     Aucune machine dans le stock pour cette catégorie.
@@ -358,10 +350,10 @@ const MachineStockList = () => {
                       }
                     >
                       <td className="px-5 py-3 font-medium text-gray-900">
-                        {machine.reference || "—"}
+                        {machine.marque || "—"}
                       </td>
 
-                      <td className="px-5 py-3">{machine.marque || "—"}</td>
+                      <td className="px-5 py-3">{machine.reference || "—"}</td>
 
                       <td className="px-5 py-3">{machine.numSerie || "—"}</td>
 
@@ -369,40 +361,31 @@ const MachineStockList = () => {
                         {machine.numInventaire || "—"}
                       </td>
 
-                      <td className="px-5 py-3">{machine.etat || "—"}</td>
-
                       <td className="px-5 py-3">
                         {machine.createdAt
-                          ? new Date(machine.createdAt).toLocaleString()
+                          ? new Date(machine.createdAt).toLocaleDateString("fr-FR")
                           : "—"}
                       </td>
 
                       <td className="px-5 py-3">
-                        <button
-                          onClick={
-                            canAssign
-                              ? () => setAssignTargetId(machine.id)
-                              : undefined
-                          }
-                          disabled={!canAssign}
-                          className={[
-                            "rounded-lg px-3 py-1.5 text-xs font-medium text-white",
-                            canAssign
-                              ? "bg-blue-600 hover:bg-blue-700"
-                              : "cursor-not-allowed bg-blue-600 opacity-50",
-                          ].join(" ")}
-                          title={
-                            canAssign
-                              ? "Affecter par hiérarchie"
-                              : "Permission requise (ADMIN ou MANAGER)"
-                          }
-                        >
-                          Affecter
-                        </button>
-                      </td>
-
-                      <td className="px-5 py-3">
                         <div className="flex items-center gap-2">
+                          <button
+                            onClick={
+                              canAssign
+                                ? () => setAssignTargetId(machine.id)
+                                : undefined
+                            }
+                            disabled={!canAssign}
+                            className={[
+                              "rounded border px-2 py-1 text-xs",
+                              canAssign
+                                ? "text-blue-700 hover:bg-blue-50"
+                                : "cursor-not-allowed opacity-50",
+                            ].join(" ")}
+                          >
+                            Affecter
+                          </button>
+
                           <button
                             className={[
                               "rounded border px-2 py-1 text-xs",

@@ -1,32 +1,11 @@
 services:
-  mssql:
-    image: mcr.microsoft.com/mssql/server:2019-latest
-    container_name: stock-mssql
-    environment:
-      - ACCEPT_EULA=Y
-      - SA_PASSWORD=Admin123!
-    ports:
-      - "1433:1433"
-    volumes:
-      - mssql_data:/var/opt/mssql
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/1433'"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 10s
-
   backend:
     build:
       context: ./backend-stock
       dockerfile: Dockerfile
     container_name: stock-backend
-    depends_on:
-      mssql:
-        condition: service_healthy
     environment:
-      - DATABASE_URL=sqlserver://mssql:1433;database=gestion_stock;user=sa;password=Admin123!;encrypt=true;trustServerCertificate=true
+      - DATABASE_URL=mysql://root@host.docker.internal:3306/gestion_stock
       - NODE_ENV=production
       - JWT_SECRET=changeme
       - JWT_EXPIRES=7d
@@ -35,15 +14,13 @@ services:
     restart: unless-stopped
     command: >
       bash -lc "
-        sleep 20 &&
         npx prisma generate &&
         npx prisma db push &&
         npm run build &&
         npm run start:prod
       "
 
-
-  frontend:      
+  frontend:
     build:
       context: ./frontend-stock
       dockerfile: Dockerfile.dev
@@ -59,7 +36,3 @@ services:
     command: >
       sh -c "npm install &&
              npm run dev -- --host 0.0.0.0 --port 5173 --strictPort"
-
-
-volumes:
-  mssql_data:

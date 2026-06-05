@@ -1,4 +1,4 @@
-// src/components/MachineStockList.tsx
+// src/components/MachinesAffectees.tsx
 import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import * as XLSX from "xlsx";
 import AssignDestinationModal from "./AssignDestinationModal";
@@ -95,16 +95,66 @@ function normalizedType(type: string) {
   return NORMALIZE[key] || key;
 }
 
-function destinationLabel(machine: Machine) {
+function isDeliveredStatus(status?: string | null) {
+  const value = String(status || "").trim().toLowerCase();
+
   return (
-    [
-      machine.destination?.etablissement?.nom,
-      machine.destination?.service?.nom,
-      machine.destination?.bureau,
-    ]
-      .filter(Boolean)
-      .join(" - ") || "Stock"
+    value.includes("délivr") ||
+    value.includes("delivr") ||
+    value === "delivree" ||
+    value === "délivrée"
   );
+}
+
+function isRepairStatus(status?: string | null) {
+  const value = String(status || "").trim().toLowerCase();
+
+  return (
+    value.includes("réparation") ||
+    value.includes("reparation") ||
+    value.includes("repair")
+  );
+}
+
+function isAffectedMachine(machine: Machine) {
+  const status = String(machine.status || "").trim().toLowerCase();
+
+  const affectedByStatus =
+    status === "affectée" ||
+    status === "affectee" ||
+    status.includes("affect");
+
+  return (
+    !isDeliveredStatus(machine.status) &&
+    !isRepairStatus(machine.status) &&
+    (affectedByStatus || Boolean(machine.destinationId))
+  );
+}
+
+function destinationLabel(machine: Machine) {
+  const etablissement = machine.destination?.etablissement?.nom?.trim();
+  const service = machine.destination?.service?.nom?.trim();
+  const bureau = machine.destination?.bureau?.trim();
+
+  const parts: string[] = [];
+
+  if (etablissement) {
+    parts.push(etablissement);
+  }
+
+  if (service) {
+    parts.push(service);
+  }
+
+  if (
+    bureau &&
+    bureau.toLowerCase() !== service?.toLowerCase() &&
+    bureau.toLowerCase() !== etablissement?.toLowerCase()
+  ) {
+    parts.push(bureau);
+  }
+
+  return parts.join(" - ") || "Stock";
 }
 
 function affectataireLabel(machine: Machine) {
@@ -114,26 +164,21 @@ function affectataireLabel(machine: Machine) {
 export default function MachinesAffectees() {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [activeCat, setActiveCat] = useState<string>("unité centrale");
-  const [openAdd, setOpenAdd] = useState(false);
   const [search, setSearch] = useState("");
   const [assignTargetId, setAssignTargetId] = useState<number | null>(null);
-  const [editTarget, setEditTarget] = useState<Machine | null>(null);
+  const [deliverTargetId, setDeliverTargetId] = useState<number | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
-  const [showDeleteForId, setShowDeleteForId] = useState<number | null>(null);
   const [role, setRole] = useState<Role>("VIEWER");
 
-  const canCreate = role === "ADMIN" || role === "MANAGER";
   const canAssign = role === "ADMIN" || role === "MANAGER";
   const canEdit = role === "ADMIN" || role === "MANAGER";
-  const canDelete = role === "ADMIN";
 
   const loadMachines = async () => {
     try {
       const data = await api<Machine[]>("/machines");
+      const affectees = data.filter((machine) => isAffectedMachine(machine));
 
-      // Important:
-      // Ne pas filtrer par status="stocké", car les machines importées sont "affectée".
-      setMachines(data);
+      setMachines(affectees);
     } catch {
       setMachines([]);
     }
@@ -145,7 +190,9 @@ export default function MachinesAffectees() {
   }, []);
 
   const filteredByCategory = useMemo(() => {
-    return machines.filter((machine) => normalizedType(machine.type) === activeCat);
+    return machines.filter(
+      (machine) => normalizedType(machine.type) === activeCat
+    );
   }, [machines, activeCat]);
 
   const filteredBySearch = useMemo(() => {
@@ -174,27 +221,33 @@ export default function MachinesAffectees() {
     });
   }, [filteredByCategory, search]);
 
-  const deleteOne = async (id: number) => {
-    const ok = confirm("Voulez-vous vraiment supprimer cette machine ?");
-    if (!ok) return;
+  const addToDelivered = async (id: number) => {
+    try {
+      await api<void>(`/machines/${id}/deliver`, { method: "PUT" });
 
-    await api<void>(`/machines/${id}`, { method: "DELETE" }).catch(() => {});
-    await loadMachines();
+      await loadMachines();
 
-    setShowDeleteForId(null);
-    setBanner("La machine a été supprimée.");
-    setTimeout(() => setBanner(null), 2500);
+      setDeliverTargetId(null);
+      setBanner("La machine a été ajoutée aux délivrées avec succès.");
+      setTimeout(() => setBanner(null), 2500);
+    } catch {
+      setBanner("Erreur lors de l'ajout aux délivrées.");
+      setTimeout(() => setBanner(null), 2500);
+    }
   };
 
   const exportStockExcel = () => {
-    const byType = machines.reduce<Record<string, Machine[]>>((acc, machine) => {
-      const key = normalizedType(machine.type) || "Divers";
+    const byType = machines.reduce<Record<string, Machine[]>>(
+      (acc, machine) => {
+        const key = normalizedType(machine.type) || "Divers";
 
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(machine);
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(machine);
 
-      return acc;
-    }, {});
+        return acc;
+      },
+      {}
+    );
 
     const workbook = XLSX.utils.book_new();
 
@@ -232,7 +285,7 @@ export default function MachinesAffectees() {
       XLSX.utils.book_append_sheet(workbook, worksheet, safeName || "Divers");
     });
 
-    XLSX.writeFile(workbook, "machines_par_type.xlsx");
+    XLSX.writeFile(workbook, "machines_affectees_par_type.xlsx");
   };
 
   return (
@@ -241,10 +294,11 @@ export default function MachinesAffectees() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-               Machines Affectées
+              Machines Affectées
             </h1>
+
             <p className="mt-1 text-sm text-gray-500">
-              Total machines: {machines.length}
+              Total machines affectées : {machines.length}
             </p>
           </div>
 
@@ -252,11 +306,10 @@ export default function MachinesAffectees() {
             <button
               onClick={exportStockExcel}
               className="rounded-xl border bg-gradient-to-b from-white to-gray-50 px-3 py-2 text-sm font-medium text-gray-800 shadow-sm hover:bg-white"
-              title="Exporter les machines"
+              title="Exporter les machines affectées"
             >
               Export Excel
             </button>
-
           </div>
         </div>
 
@@ -297,10 +350,7 @@ export default function MachinesAffectees() {
               {CATEGORIES.map((category) => (
                 <button
                   key={category.key}
-                  onClick={() => {
-                    setActiveCat(category.key);
-                    setShowDeleteForId(null);
-                  }}
+                  onClick={() => setActiveCat(category.key)}
                   className={[
                     "rounded-full px-3 py-1 text-xs font-medium transition",
                     activeCat === category.key
@@ -324,8 +374,8 @@ export default function MachinesAffectees() {
           <table className="w-full text-left text-sm text-gray-700">
             <thead className="bg-gray-50 text-xs uppercase">
               <tr>
-                <th className="px-5 py-3">Référence</th>
                 <th className="px-5 py-3">Marque</th>
+                <th className="px-5 py-3">Référence</th>
                 <th className="px-5 py-3">N° Série</th>
                 <th className="px-5 py-3">N° Inventaire</th>
                 <th className="px-5 py-3">État</th>
@@ -346,92 +396,88 @@ export default function MachinesAffectees() {
                   </td>
                 </tr>
               ) : (
-                filteredBySearch.map((machine) => {
-                  const showDelete = showDeleteForId === machine.id;
+                filteredBySearch.map((machine) => (
+                  <tr
+                    key={machine.id}
+                    className="border-t transition hover:bg-gray-50"
+                  >
+                    <td className="px-5 py-3 font-medium text-gray-900">
+                      {machine.marque || "—"}
+                    </td>
 
-                  return (
-                    <tr
-                      key={machine.id}
-                      className="border-t transition hover:bg-gray-50"
-                      onDoubleClick={() => {
-                        if (!canDelete) return;
+                    <td className="px-5 py-3">{machine.reference || "—"}</td>
 
-                        setShowDeleteForId((previous) =>
-                          previous === machine.id ? null : machine.id
-                        );
-                      }}
-                      title={
-                        canDelete
-                          ? "Double-cliquez pour afficher la suppression"
-                          : "Suppression réservée à l'administrateur"
-                      }
-                    >
-                      <td className="px-5 py-3 font-medium text-gray-900">
-                        {machine.reference || "—"}
-                      </td>
+                    <td className="px-5 py-3">{machine.numSerie || "—"}</td>
 
-                      <td className="px-5 py-3">{machine.marque || "—"}</td>
+                    <td className="px-5 py-3">
+                      {machine.numInventaire || "—"}
+                    </td>
 
-                      <td className="px-5 py-3">{machine.numSerie || "—"}</td>
+                    <td className="px-5 py-3">{machine.etat || "—"}</td>
 
-                      <td className="px-5 py-3">
-                        {machine.numInventaire || "—"}
-                      </td>
-
-                      <td className="px-5 py-3">{machine.etat || "—"}</td>
-
-                      <td className="px-5 py-3">
-                        <div className="text-xs text-gray-700">
-                          <div className="font-medium">
-                            {destinationLabel(machine)}
-                          </div>
-                          <div className="text-gray-500">
-                            {affectataireLabel(machine)}
-                          </div>
+                    <td className="px-5 py-3">
+                      <div className="text-xs text-gray-700">
+                        <div className="font-medium">
+                          {destinationLabel(machine)}
                         </div>
 
-                        {canAssign && (
-                          <button
-                            onClick={() => setAssignTargetId(machine.id)}
-                            className="mt-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                            title="Affecter par hiérarchie"
-                          >
-                            Affecter
-                          </button>
-                        )}
-                      </td>
-
-                      <td className="px-5 py-3">{machine.status || "—"}</td>
-
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
-                          <button
-                            className={[
-                              "rounded border px-2 py-1 text-xs",
-                              canEdit
-                                ? "hover:bg-gray-100"
-                                : "cursor-not-allowed opacity-50",
-                            ].join(" ")}
-                            title={
-                              canEdit
-                                ? "Modifier"
-                                : "Permission requise (ADMIN ou MANAGER)"
-                            }
-                            onClick={
-                              canEdit
-                                ? () => setEditTarget(machine)
-                                : undefined
-                            }
-                            disabled={!canEdit}
-                          >
-                            Ajouter aux délivrées
-                          </button>
-
+                        <div className="text-gray-500">
+                          {affectataireLabel(machine)}
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })
+                      </div>
+                    </td>
+
+                    <td className="px-5 py-3">{machine.status || "—"}</td>
+
+                    <td className="px-5 py-3">
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={
+                            canAssign
+                              ? () => setAssignTargetId(machine.id)
+                              : undefined
+                          }
+                          disabled={!canAssign}
+                          className={[
+                            "rounded-lg px-3 py-1.5 text-xs font-medium text-white",
+                            canAssign
+                              ? "bg-blue-600 hover:bg-blue-700"
+                              : "cursor-not-allowed bg-blue-600 opacity-50",
+                          ].join(" ")}
+                          title={
+                            canAssign
+                              ? "Affecter par hiérarchie"
+                              : "Permission requise (ADMIN ou MANAGER)"
+                          }
+                        >
+                          Affecter
+                        </button>
+
+                        <button
+                          onClick={
+                            canEdit
+                              ? () => setDeliverTargetId(machine.id)
+                              : undefined
+                          }
+                          disabled={!canEdit}
+                          className={[
+                            "rounded-lg px-3 py-1.5 text-xs font-medium text-white",
+                            canEdit
+                              ? "bg-indigo-600 hover:bg-indigo-700"
+                              : "cursor-not-allowed bg-indigo-600 opacity-50",
+                          ].join(" ")}
+                          title={
+                            canEdit
+                              ? "Ajouter aux machines délivrées"
+                              : "Permission requise (ADMIN ou MANAGER)"
+                          }
+                        >
+                          Ajouter aux délivrées
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -449,6 +495,7 @@ export default function MachinesAffectees() {
           fallback={
             <div className="animate-pulse space-y-3">
               <div className="h-5 w-40 rounded bg-gray-200" />
+
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="h-28 rounded-xl bg-gray-100" />
                 <div className="h-28 rounded-xl bg-gray-100" />
@@ -459,23 +506,62 @@ export default function MachinesAffectees() {
           <RepairMachinesSection
             onDone={() => {
               loadMachines();
+
               setBanner(
                 "Réparation terminée : machine renvoyée à sa juridiction source."
               );
+
               setTimeout(() => setBanner(null), 2500);
             }}
           />
         </Suspense>
       </section>
 
+      {deliverTargetId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setDeliverTargetId(null)}
+          />
 
+          <div className="relative z-50 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Confirmation
+            </h3>
 
+            <p className="mt-3 text-sm text-gray-600">
+              Voulez-vous vraiment ajouter cette machine aux délivrées ?
+            </p>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setDeliverTargetId(null)}
+                className="rounded-lg border px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+
+              <button
+                onClick={() => addToDelivered(deliverTargetId)}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <AssignDestinationModal
         open={assignTargetId !== null && canAssign}
         machineId={assignTargetId}
         onClose={() => setAssignTargetId(null)}
-        onAssigned={loadMachines}
+        onAssigned={() => {
+          loadMachines();
+          setAssignTargetId(null);
+          setBanner("Destination modifiée avec succès.");
+          setTimeout(() => setBanner(null), 2500);
+        }}
       />
     </div>
   );
