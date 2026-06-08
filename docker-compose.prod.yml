@@ -1,36 +1,20 @@
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: stock-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    restart: unless-stopped
-
   backend:
     build:
       context: ./backend-stock
       dockerfile: Dockerfile
     container_name: stock-backend
-    depends_on:
-      - mysql
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL=mysql://root@host.docker.internal:3306/gestion_stock
       - NODE_ENV=production
-      - JWT_SECRET=${JWT_SECRET}
-      - JWT_EXPIRES=${JWT_EXPIRES}
+      - JWT_SECRET=change_this_secret_in_production
+      - JWT_EXPIRES=7d
     ports:
       - "4000:3000"
     restart: unless-stopped
     command: >
       bash -lc "
-        sleep 25 &&
+        sleep 10 &&
         npx prisma generate &&
         npx prisma db push &&
         npm run build &&
@@ -45,8 +29,5 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:80"
+      - "8088:80"
     restart: unless-stopped
-
-volumes:
-  mysql_data:
