@@ -6,14 +6,17 @@ import { Roles } from '../auth/roles.decorator';
 
 type CreateDto = {
   type: string;
+  marque?: string | null;
   reference: string;
   numSerie: string;
   numInventaire: string;
+  createdAt?: string;
 };
 
 type UpdateDto = Partial<CreateDto> & {
   status?: 'stocké' | 'affectée' | 'délivrée' | string;
   destinationId?: number | null;
+  affectataireId?: number | null;
 };
 @Controller('machines')
 export class MachineController {

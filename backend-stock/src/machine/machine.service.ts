@@ -10,12 +10,39 @@ const isRepair = (s?: string | null) =>
 export class MachineService {
   constructor(private prisma: PrismaService) {}
 
+  private parseDate(value?: string | null): Date | undefined {
+    if (!value) return undefined;
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return undefined;
+    }
+
+    return date;
+  }
+
   private destinationLabel(destination: any): string {
     if (!destination) return 'Stock';
+
     const etab = destination.etablissement?.nom ?? '';
     const service = destination.service?.nom ?? '';
     const bureau = destination.bureau ?? '';
-    return [etab, service, bureau].filter(Boolean).join(' - ') || 'Destination';
+
+    const parts: string[] = [];
+
+    if (etab) parts.push(etab);
+    if (service) parts.push(service);
+
+    if (
+      bureau &&
+      bureau.toLowerCase() !== service.toLowerCase() &&
+      bureau.toLowerCase() !== etab.toLowerCase()
+    ) {
+      parts.push(bureau);
+    }
+
+    return parts.filter(Boolean).join(' - ') || 'Destination';
   }
 
   create(data: {
@@ -23,21 +50,38 @@ export class MachineService {
     reference?: string;
     numSerie?: string;
     numInventaire?: string;
-    marque?: string;
-    referenceMarche?: string;
-    etat?: string;
+    marque?: string | null;
+    referenceMarche?: string | null;
+    etat?: string | null;
+    createdAt?: string;
     destinationId?: number | null;
     affectataireId?: number | null;
   }) {
+    const createdAt = this.parseDate(data.createdAt);
+
     return this.prisma.machine.create({
       data: {
-        ...data,
+        type: data.type,
+        marque: data.marque || null,
+        reference: data.reference || null,
+        numSerie: data.numSerie || null,
+        numInventaire: data.numInventaire || null,
+        referenceMarche: data.referenceMarche || null,
+        etat: data.etat || null,
+        destinationId: data.destinationId ?? null,
+        affectataireId: data.affectataireId ?? null,
         status: data.destinationId ? 'affectée' : 'stocké',
+        ...(createdAt ? { createdAt } : {}),
       },
     });
   }
 
-  private async createHistory(machineId: number, fromValue: string | null, toValue: string, actionType = 'MOUVEMENT') {
+  private async createHistory(
+    machineId: number,
+    fromValue: string | null,
+    toValue: string,
+    actionType = 'MOUVEMENT',
+  ) {
     return this.prisma.history.create({
       data: {
         machineId,
@@ -55,19 +99,28 @@ export class MachineService {
     });
 
     const isStock = (s?: string | null) =>
-      !!s && (s.toLowerCase() === 'stock' || s.toLowerCase().includes('stock'));
+      !!s &&
+      (s.toLowerCase() === 'stock' || s.toLowerCase().includes('stock'));
+
     const isDelivered = (s?: string | null) =>
-      !!s && (s.toLowerCase().includes('machines délivrées') || s.toLowerCase().includes('délivr'));
+      !!s &&
+      (s.toLowerCase().includes('machines délivrées') ||
+        s.toLowerCase().includes('délivr'));
 
     let lastMeaningfulTo = '';
 
     for (const ev of hist) {
       const to = (ev.toValue || '').trim();
-      if (isRepair(to)) return lastMeaningfulTo || '';
+
+      if (isRepair(to)) {
+        return lastMeaningfulTo || '';
+      }
+
       if (to && !isStock(to) && !isRepair(to) && !isDelivered(to)) {
         lastMeaningfulTo = to;
       }
     }
+
     return lastMeaningfulTo || '';
   }
 
@@ -87,7 +140,10 @@ export class MachineService {
 
   findStock() {
     return this.prisma.machine.findMany({
-      where: { status: 'stocké', destinationId: null },
+      where: {
+        status: 'stocké',
+        destinationId: null,
+      },
       include: {
         destination: {
           include: {
@@ -125,6 +181,7 @@ export class MachineService {
             service: true,
           },
         },
+        affectataire: true,
         histories: {
           orderBy: { changedAt: 'desc' },
           take: 1,
@@ -150,6 +207,7 @@ export class MachineService {
         },
       },
     });
+
     if (!before) throw new NotFoundException('Machine introuvable');
 
     const dest = await this.prisma.destination.findUnique({
@@ -159,6 +217,7 @@ export class MachineService {
         service: true,
       },
     });
+
     if (!dest) throw new NotFoundException('Destination introuvable');
 
     const from = this.destinationLabel(before.destination);
@@ -166,7 +225,10 @@ export class MachineService {
 
     const updated = await this.prisma.machine.update({
       where: { id },
-      data: { destinationId, status: 'affectée' },
+      data: {
+        destinationId,
+        status: 'affectée',
+      },
       include: {
         destination: {
           include: {
@@ -190,7 +252,13 @@ export class MachineService {
     const machinesToDeliver = await this.prisma.machine.findMany({
       where: {
         status: { not: 'délivrée' },
-        histories: { some: { changedAt: { lte: thresholdDate } } },
+        histories: {
+          some: {
+            changedAt: {
+              lte: thresholdDate,
+            },
+          },
+        },
       },
       include: {
         destination: {
@@ -202,19 +270,27 @@ export class MachineService {
       },
     });
 
-    for (const m of machinesToDeliver) {
-      const fromName = this.destinationLabel(m.destination);
-      await this.createHistory(m.id, fromName, 'Machines délivrées', 'DELIVREE');
+    for (const machine of machinesToDeliver) {
+      const fromName = this.destinationLabel(machine.destination);
+
+      await this.createHistory(
+        machine.id,
+        fromName,
+        'Machines délivrées',
+        'DELIVREE',
+      );
 
       await this.prisma.machine.update({
-        where: { id: m.id },
-        data: { status: 'délivrée' },
+        where: { id: machine.id },
+        data: {
+          status: 'délivrée',
+        },
       });
     }
 
     return {
       updated: machinesToDeliver.length,
-      machines: machinesToDeliver.map((m) => m.reference),
+      machines: machinesToDeliver.map((machine) => machine.reference),
     };
   }
 
@@ -230,15 +306,23 @@ export class MachineService {
         },
       },
     });
+
     if (!machine) throw new NotFoundException('Machine introuvable');
 
     const fromName = this.destinationLabel(machine.destination);
 
-    await this.createHistory(id, fromName, 'Machines délivrées', 'DELIVREE');
+    await this.createHistory(
+      id,
+      fromName,
+      'Machines délivrées',
+      'DELIVREE',
+    );
 
     return this.prisma.machine.update({
       where: { id },
-      data: { status: 'délivrée' },
+      data: {
+        status: 'délivrée',
+      },
     });
   }
 
@@ -263,7 +347,11 @@ export class MachineService {
           },
         },
         affectataire: true,
-        histories: { orderBy: { changedAt: 'asc' } },
+        histories: {
+          orderBy: {
+            changedAt: 'asc',
+          },
+        },
       },
     });
   }
@@ -280,20 +368,32 @@ export class MachineService {
         },
       },
     });
+
     if (!machine) throw new NotFoundException('Machine introuvable');
 
     const sourceName = await this.getSourceBeforeRepair(id);
-    if (!sourceName) throw new Error('Source introuvable dans l’historique');
+
+    if (!sourceName) {
+      throw new Error('Source introuvable dans l’historique');
+    }
 
     const dest = await this.prisma.destination.findFirst({
-      where: { bureau: sourceName },
+      where: {
+        OR: [
+          { bureau: sourceName },
+          { service: { nom: sourceName } },
+          { etablissement: { nom: sourceName } },
+        ],
+      },
       include: {
         etablissement: true,
         service: true,
       },
     });
 
-    if (!dest) throw new Error(`Destination "${sourceName}" introuvable`);
+    if (!dest) {
+      throw new Error(`Destination "${sourceName}" introuvable`);
+    }
 
     const to = this.destinationLabel(dest);
 
@@ -312,6 +412,7 @@ export class MachineService {
             service: true,
           },
         },
+        affectataire: true,
       },
     });
   }
@@ -323,9 +424,10 @@ export class MachineService {
       reference: string;
       numSerie: string;
       numInventaire: string;
-      marque: string;
-      referenceMarche: string;
-      etat: string;
+      marque: string | null;
+      referenceMarche: string | null;
+      etat: string | null;
+      createdAt: string;
       status: string;
       destinationId: number | null;
       affectataireId: number | null;
@@ -342,6 +444,7 @@ export class MachineService {
         },
       },
     });
+
     if (!current) throw new NotFoundException('Machine introuvable');
 
     if (data.status && data.status.toLowerCase().includes('réparation')) {
@@ -354,19 +457,32 @@ export class MachineService {
       }
     }
 
+    const createdAt = this.parseDate(data.createdAt);
+
     return this.prisma.machine.update({
       where: { id },
       data: {
         ...(data.type !== undefined ? { type: data.type } : {}),
         ...(data.reference !== undefined ? { reference: data.reference } : {}),
         ...(data.numSerie !== undefined ? { numSerie: data.numSerie } : {}),
-        ...(data.numInventaire !== undefined ? { numInventaire: data.numInventaire } : {}),
+        ...(data.numInventaire !== undefined
+          ? { numInventaire: data.numInventaire }
+          : {}),
         ...(data.marque !== undefined ? { marque: data.marque } : {}),
-        ...(data.referenceMarche !== undefined ? { referenceMarche: data.referenceMarche } : {}),
+        ...(data.referenceMarche !== undefined
+          ? { referenceMarche: data.referenceMarche }
+          : {}),
         ...(data.etat !== undefined ? { etat: data.etat } : {}),
+        ...(data.createdAt !== undefined
+          ? { createdAt: createdAt || current.createdAt }
+          : {}),
         ...(data.status !== undefined ? { status: data.status } : {}),
-        ...(data.destinationId !== undefined ? { destinationId: data.destinationId } : {}),
-        ...(data.affectataireId !== undefined ? { affectataireId: data.affectataireId } : {}),
+        ...(data.destinationId !== undefined
+          ? { destinationId: data.destinationId }
+          : {}),
+        ...(data.affectataireId !== undefined
+          ? { affectataireId: data.affectataireId }
+          : {}),
       },
       include: {
         destination: {
@@ -381,22 +497,41 @@ export class MachineService {
   }
 
   async delete(id: number) {
-    await this.prisma.history.deleteMany({ where: { machineId: id } });
-    return this.prisma.machine.delete({ where: { id } });
+    await this.prisma.history.deleteMany({
+      where: {
+        machineId: id,
+      },
+    });
+
+    return this.prisma.machine.delete({
+      where: { id },
+    });
   }
 
   async bulkDelete(ids: number[]) {
-    if (!ids.length) return { deleted: 0 };
+    if (!ids.length) {
+      return { deleted: 0 };
+    }
 
     await this.prisma.history.deleteMany({
-      where: { machineId: { in: ids } },
+      where: {
+        machineId: {
+          in: ids,
+        },
+      },
     });
 
-    const res = await this.prisma.machine.deleteMany({
-      where: { id: { in: ids } },
+    const result = await this.prisma.machine.deleteMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
     });
 
-    return { deleted: res.count };
+    return {
+      deleted: result.count,
+    };
   }
 
   async assign(id: number, destinationId: number) {

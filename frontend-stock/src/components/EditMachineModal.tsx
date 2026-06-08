@@ -4,10 +4,12 @@ import { api } from "../lib/api";
 interface Machine {
   id: number;
   type: string;
+  marque?: string | null;
   reference: string;
   numSerie: string;
   numInventaire: string;
   status: string;
+  createdAt?: string;
   destinationId?: number | null;
 }
 
@@ -22,6 +24,31 @@ const TYPE_OPTIONS = [
 
 const norm = (s: string) => (s || "").trim().toLowerCase();
 
+const todayDateInput = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
+const dateToInput = (date?: string | null) => {
+  if (!date) return todayDateInput();
+
+  const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return todayDateInput();
+  }
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
 export default function EditMachineModal({
   open,
   machine,
@@ -33,144 +60,211 @@ export default function EditMachineModal({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
-  // ⛔️ Ne rien rendre tant que le modal est fermé (évite les hooks conditionnels)
-  if (!open || !machine) return null;
-
-  // Etats du formulaire
   const [form, setForm] = useState({
-    type: machine.type || "",
-    reference: machine.reference || "",
-    numSerie: machine.numSerie || "",
-    numInventaire: machine.numInventaire || "",
+    type: "",
+    marque: "",
+    reference: "",
+    numSerie: "",
+    numInventaire: "",
+    dateAjout: todayDateInput(),
   });
-  const [saving, setSaving] = useState(false);
 
-  // Données pour vérification d’unicité
+  const [saving, setSaving] = useState(false);
   const [allMachines, setAllMachines] = useState<Machine[]>([]);
   const [loadingCheck, setLoadingCheck] = useState(false);
 
-  // Sync si la machine change pendant l’ouverture
   useEffect(() => {
+    if (!open || !machine) return;
+
     setForm({
       type: machine.type || "",
+      marque: machine.marque || "",
       reference: machine.reference || "",
       numSerie: machine.numSerie || "",
       numInventaire: machine.numInventaire || "",
+      dateAjout: dateToInput(machine.createdAt),
     });
-  }, [machine]);
+  }, [open, machine]);
 
-  // Charger toutes les machines quand le modal est ouvert
   useEffect(() => {
+    if (!open) return;
+
     let alive = true;
+
     (async () => {
       try {
         setLoadingCheck(true);
+
         const list = await api<Machine[]>("/machines");
-        if (alive) setAllMachines(list || []);
+
+        if (alive) {
+          setAllMachines(list || []);
+        }
       } catch {
-        if (alive) setAllMachines([]);
+        if (alive) {
+          setAllMachines([]);
+        }
       } finally {
-        if (alive) setLoadingCheck(false);
+        if (alive) {
+          setLoadingCheck(false);
+        }
       }
     })();
+
     return () => {
       alive = false;
     };
-  }, []);
+  }, [open]);
 
-  const onChange = (k: keyof typeof form, v: string) =>
-    setForm((s) => ({ ...s, [k]: v }));
+  const onChange = (key: keyof typeof form, value: string) => {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  };
 
-  // Valeurs d’origine (normalisées)
-  const originalSerie = useMemo(() => norm(machine.numSerie), [machine.numSerie]);
-  const originalInv   = useMemo(() => norm(machine.numInventaire), [machine.numInventaire]);
+  const originalSerie = useMemo(
+    () => norm(machine?.numSerie || ""),
+    [machine?.numSerie]
+  );
 
-  // Est-ce que l’utilisateur a vraiment changé la valeur ?
+  const originalInv = useMemo(
+    () => norm(machine?.numInventaire || ""),
+    [machine?.numInventaire]
+  );
+
   const serieChanged = useMemo(
     () => norm(form.numSerie) !== originalSerie,
     [form.numSerie, originalSerie]
   );
+
   const invChanged = useMemo(
     () => norm(form.numInventaire) !== originalInv,
     [form.numInventaire, originalInv]
   );
 
-  // Doublons (on NE bloque QUE si l’utilisateur a changé la valeur)
   const serieTaken = useMemo(() => {
+    if (!machine) return false;
     if (!serieChanged) return false;
-    const v = norm(form.numSerie);
-    if (!v) return false;
+
+    const value = norm(form.numSerie);
+
+    if (!value) return false;
+
     return allMachines.some(
-      (m) => m.id !== machine.id && norm(m.numSerie) === v
+      (item) => item.id !== machine.id && norm(item.numSerie) === value
     );
-  }, [allMachines, form.numSerie, machine.id, serieChanged]);
+  }, [allMachines, form.numSerie, machine, serieChanged]);
 
   const invTaken = useMemo(() => {
+    if (!machine) return false;
     if (!invChanged) return false;
-    const v = norm(form.numInventaire);
-    if (!v) return false;
+
+    const value = norm(form.numInventaire);
+
+    if (!value) return false;
+
     return allMachines.some(
-      (m) => m.id !== machine.id && norm(m.numInventaire) === v
+      (item) => item.id !== machine.id && norm(item.numInventaire) === value
     );
-  }, [allMachines, form.numInventaire, machine.id, invChanged]);
+  }, [allMachines, form.numInventaire, machine, invChanged]);
 
   const canSave =
+    !!machine &&
     !saving &&
     !loadingCheck &&
     form.type.trim() !== "" &&
     form.reference.trim() !== "" &&
     form.numSerie.trim() !== "" &&
     form.numInventaire.trim() !== "" &&
+    form.dateAjout.trim() !== "" &&
     !serieTaken &&
     !invTaken;
 
   const save = async () => {
-    if (!canSave) return;
+    if (!machine || !canSave) return;
+
     setSaving(true);
+
     try {
       await api(`/machines/${machine.id}`, {
         method: "PUT",
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          type: form.type,
+          marque: form.marque,
+          reference: form.reference,
+          numSerie: form.numSerie,
+          numInventaire: form.numInventaire,
+
+          // Date d'ajout choisie par l'utilisateur, sans heure dans le formulaire
+          createdAt: `${form.dateAjout}T00:00:00.000Z`,
+        }),
       });
+
       await onSaved();
       onClose();
-    } catch (e: any) {
-      alert(e?.message || "Échec de la sauvegarde");
+    } catch (error: any) {
+      alert(error?.message || "Échec de la sauvegarde");
     } finally {
       setSaving(false);
     }
   };
+
+  if (!open || !machine) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">
-            Modifier la machine (série {machine.numSerie || "—"})
+            Modifier la machine {machine.reference || "—"}
           </h2>
-          <button onClick={onClose} className="rounded p-1 hover:bg-gray-100">✕</button>
+
+          <button
+            onClick={onClose}
+            className="rounded p-1 hover:bg-gray-100"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
         </div>
 
         <div className="space-y-3">
           <div>
             <label className="mb-1 block text-sm">Type</label>
+
             <select
               value={form.type}
-              onChange={(e) => onChange("type", e.target.value)}
+              onChange={(event) => onChange("type", event.target.value)}
               className="w-full rounded border px-3 py-2"
             >
               <option value="">-- Sélectionner --</option>
-              {TYPE_OPTIONS.map((t) => (
-                <option key={t} value={t}>{t}</option>
+
+              {TYPE_OPTIONS.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
               ))}
             </select>
           </div>
 
           <div>
+            <label className="mb-1 block text-sm">Marque</label>
+
+            <input
+              value={form.marque}
+              onChange={(event) => onChange("marque", event.target.value)}
+              className="w-full rounded border px-3 py-2"
+              placeholder="Ex: Dell, HP, Canon..."
+            />
+          </div>
+
+          <div>
             <label className="mb-1 block text-sm">Référence</label>
+
             <input
               value={form.reference}
-              onChange={(e) => onChange("reference", e.target.value)}
+              onChange={(event) => onChange("reference", event.target.value)}
               className="w-full rounded border px-3 py-2"
               placeholder="Référence"
             />
@@ -179,15 +273,19 @@ export default function EditMachineModal({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm">N° Série</label>
+
               <input
                 value={form.numSerie}
-                onChange={(e) => onChange("numSerie", e.target.value)}
+                onChange={(event) => onChange("numSerie", event.target.value)}
                 className={[
                   "w-full rounded border px-3 py-2",
-                  serieChanged && serieTaken ? "border-red-400" : "border-gray-300",
+                  serieChanged && serieTaken
+                    ? "border-red-400 bg-red-50"
+                    : "border-gray-300",
                 ].join(" ")}
                 placeholder="N° Série"
               />
+
               {serieChanged && serieTaken && (
                 <div className="mt-1 text-xs text-red-600">
                   Ce n° de série existe déjà.
@@ -197,15 +295,21 @@ export default function EditMachineModal({
 
             <div>
               <label className="mb-1 block text-sm">N° Inventaire</label>
+
               <input
                 value={form.numInventaire}
-                onChange={(e) => onChange("numInventaire", e.target.value)}
+                onChange={(event) =>
+                  onChange("numInventaire", event.target.value)
+                }
                 className={[
                   "w-full rounded border px-3 py-2",
-                  invChanged && invTaken ? "border-red-400" : "border-gray-300",
+                  invChanged && invTaken
+                    ? "border-red-400 bg-red-50"
+                    : "border-gray-300",
                 ].join(" ")}
                 placeholder="N° Inventaire"
               />
+
               {invChanged && invTaken && (
                 <div className="mt-1 text-xs text-red-600">
                   Ce n° d’inventaire existe déjà.
@@ -213,12 +317,33 @@ export default function EditMachineModal({
               )}
             </div>
           </div>
+
+          <div>
+            <label className="mb-1 block text-sm">Date d’ajout</label>
+
+            <input
+              type="date"
+              value={form.dateAjout}
+              onChange={(event) => onChange("dateAjout", event.target.value)}
+              className="w-full rounded border bg-white px-3 py-2 text-gray-900"
+            />
+          </div>
+
+          {loadingCheck && (
+            <div className="text-xs text-gray-500">
+              Vérification des doublons en cours…
+            </div>
+          )}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded border px-4 py-2 hover:bg-gray-50">
+          <button
+            onClick={onClose}
+            className="rounded border px-4 py-2 hover:bg-gray-50"
+          >
             Annuler
           </button>
+
           <button
             onClick={save}
             disabled={!canSave}
@@ -227,8 +352,8 @@ export default function EditMachineModal({
               loadingCheck
                 ? "Vérification en cours…"
                 : serieTaken || invTaken
-                ? "Corrigez les doublons"
-                : undefined
+                  ? "Corrigez les doublons"
+                  : undefined
             }
           >
             {saving ? "Enregistrement..." : "Enregistrer"}
